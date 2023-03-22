@@ -1,23 +1,53 @@
+# Docker image:
+# following properties are:
+# 1. based on ubuntu 18.04
+# 2. set everything to work with conda environment base on environment.yml in this folder
+# 3. install all the dependencies for the project
+# 4. activate the conda environment
+
 FROM ubuntu:18.04
 
-# Install dependencies
-RUN apt-get update && \
-    apt-get install -y curl bzip2 git && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# set platform to platform=linux/amd64
+ENV PLATFORM=linux/amd64
 
-# Install conda
-RUN curl -sS -o /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
-    /bin/bash /tmp/miniconda.sh -b -p /opt/conda && \
-    rm -rf /tmp/miniconda.sh
+# set the working directory in the container
+WORKDIR /app
 
-# Set environment variables
-ENV PATH="/opt/conda/bin:${PATH}"
-ENV CONDA_DEFAULT_ENV=myenv
-ENV CONDA_PREFIX=/opt/conda/envs/$CONDA_DEFAULT_ENV
+# copy the dependencies file to the working directory
+COPY environment.yml .
 
-# Create and activate a new environment
-ADD environment.yml /tmp/environment.yml
-RUN conda env create -f /tmp/environment.yml && \
-    conda clean --all --yes
-ENV PATH="$CONDA_PREFIX/bin:${PATH}"
+# install dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    bzip2 \
+    ca-certificates \
+    curl \
+    git \
+    mercurial \
+    subversion \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* 
+
+
+# install miniconda virtual environment
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
+    /bin/bash ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh && \
+    /opt/conda/bin/conda clean -tipsy && \
+    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+    echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate base" >> ~/.bashrc
+
+ENV PATH /opt/conda/bin:$PATH
+
+RUN conda env create -f environment.yml
+
+# Make RUN commands use the new environment:
+SHELL ["conda", "run", "-n", "myenv", "/bin/bash", "-c"]
+
+# copy the content of the local src directory to the working directory
+COPY . .
+
+# command to run on container start
+# docker build -t myenv .
+

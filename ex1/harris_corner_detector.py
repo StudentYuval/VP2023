@@ -6,19 +6,19 @@ from matplotlib import pyplot as plt
 
 
 # Replace ID1 and ID2 with your IDs.
-ID1 = '123456789'
-ID2 = '987654321'
+ID1 = '206299463'
+ID2 = '312497084'
 
 # Harris corner detector parameters - you may change them.
 K = 0.05
 CHECKERBOARD_THRESHOLD = 1e1
 GIRAFFE_THRESHOLD = 1e6
-BUTTERFLY_IMAGE = '/home/yuval/repos/VP2023/ex1/butterfly.jpg'
+BUTTERFLY_IMAGE = 'butterfly.jpg'
 
 # Do not change the following constants:
 # input images:
-CHECKERBOARD_IMAGE = '/home/yuval/repos/VP2023/ex1/checkerboard.jpg'
-GIRAFFE_IMAGE = '/home/yuval/repos/VP2023/ex1/giraffe.jpg'
+CHECKERBOARD_IMAGE = 'checkerboard.jpg'
+GIRAFFE_IMAGE = 'giraffe.jpg'
 # result images:
 TEST_BLOCKS_FUNCTIONS_IMAGE = f'{ID1}_{ID2}_test_tiles_funcs.png'
 IMAGE_AND_CORNERS = f'{ID1}_{ID2}_image_corners.png'
@@ -131,50 +131,37 @@ def create_grad_x_and_grad_y(
     and the first row from Iy.
     Return (Ix, Iy).
     """
-    # Get image dimensions
-    if len(input_image.shape) == 2:
-        # this is the case of a black and white image
-        nof_color_channels = 1
-        height, width = input_image.shape
-
-    else:
-        # this is the case of an RGB image
-        nof_color_channels = 3
-        height, width, _ = input_image.shape
-
-
-    # Get image dimensions
-    if len(input_image.shape) == 2:
-        # this is the case of a black and white image
-        height, width = input_image.shape
-    else:
-        # this is the case of an RGB image
-        height, width, _ = input_image.shape
 
     # Convert to grayscale if needed
     if input_image.ndim == 3:
         input_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
 
-    # Convert the image to float type
+        # Convert the image to float type
     input_image = input_image.astype(np.float32)
 
     # Shift the image right by 1 column and fill the first column with zeros
     shifted_right = np.zeros_like(input_image)
     shifted_right[:, 1:] = input_image[:, :-1]
-    
+
     # Compute Ix as the difference between the grayscale image and the shifted image
     Ix = input_image - shifted_right
 
     # Shift the image down by 1 row and fill the first row with zeros
     shifted_down = np.zeros_like(input_image)
     shifted_down[1:, :] = input_image[:-1, :]
-    
+
     # Compute Iy as the difference between the grayscale image and the shifted image
     Iy = input_image - shifted_down
 
-    # Remove the first column and the first row from both Ix and Iy
-    Ix = Ix[1:, 1:]
-    Iy = Iy[1:, 1:]
+    # zero out the first column of Ix and the first row of Iy
+    Ix[:, 0] = 0
+    Iy[0, :] = 0
+
+    # Make sure Ix and Iy have the same dimensions
+    min_height = min(Ix.shape[0], Iy.shape[0])
+    min_width = min(Ix.shape[1], Iy.shape[1])
+    Ix = Ix[:min_height, :min_width]
+    Iy = Iy[:min_height, :min_width]
 
     return Ix, Iy
 
@@ -246,12 +233,28 @@ def our_harris_corner_detector(input_image: np.ndarray, K: float,
     ones where the image from (3) is larger than the threshold.
     """
     response_image = calculate_response_image(input_image, K)
-    """INSERT YOUR CODE HERE.
-    REPLACE THE output_image WITH THE BINARY MAP YOU COMPUTED."""
-    output_image = np.random.uniform(size=response_image.shape)
+
+    # Image to tiles
+    tiles = black_and_white_image_to_tiles(response_image, 25, 25)
+
+    # Non-Maximal Suppression
+    nms_tiles = np.zeros_like(tiles)
+    for i in range(tiles.shape[0]):
+        tile = tiles[i]
+        max_index = np.argmax(tile)
+        max_pos = np.unravel_index(max_index, tile.shape)
+        nms_tiles[i][max_pos] = tile[max_pos]
+
+    # Convert tiles back to image
+    nms_image = image_tiles_to_black_and_white_image(nms_tiles, input_image.shape[0], input_image.shape[1])
+
+    # Thresholding
+    output_image = np.zeros_like(nms_image)
+    output_image[nms_image > threshold] = 1
+
     return output_image
 
-
+  
 def plot_response_for_black_an_white_image(input_image: np.ndarray,
                                            response_image: np.ndarray,
                                            to_save: bool = False) -> None:
@@ -334,10 +337,10 @@ def main(to_save: bool = False) -> None:
     giraffe = cv2.imread(GIRAFFE_IMAGE)
 
     # checkerboard response image
-    # checkerboard_response_image = calculate_response_image(checkerboard, K)
-    # plot_response_for_black_an_white_image(checkerboard,
-    #                                        checkerboard_response_image,
-    #                                        to_save)
+    checkerboard_response_image = calculate_response_image(checkerboard, K)
+    plot_response_for_black_an_white_image(checkerboard,
+                                           checkerboard_response_image,
+                                           to_save)
 
     # giraffe response image
     giraffe_response_image = calculate_response_image(giraffe, K)
@@ -354,4 +357,4 @@ def main(to_save: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    main(to_save=False)
+    main(to_save=True)

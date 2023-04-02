@@ -1,7 +1,6 @@
 """Basic Video Processing methods."""
 import os
 import cv2
-import numpy as np
 
 
 # Replace ID1 and ID2 with your IDs.
@@ -43,24 +42,34 @@ def convert_video_to_grayscale(input_video_path: str,
     Args:
         input_video_path: str. Path to input video.
         output_video_path: str. Path to output video.
-    """
-    cap = cv2.VideoCapture(input_video_path)
-    parameters = get_video_parameters(cap)
-    out = cv2.VideoWriter(output_video_path, parameters['fourcc'],
-                                             parameters['fps'],
-                                            (parameters['width'], parameters['height']))
 
-    while cap.isOpened():
-        ret, frame = cap.read()
+    Additional References:
+    (1) What are fourcc parameters:
+    https://docs.microsoft.com/en-us/windows/win32/medfound/video-fourccs
+    """
+    # open input video
+    vc = cv2.VideoCapture(input_video_path)
+    parameters = get_video_parameters(vc)
+
+    # open output video as grayscale
+    vw = cv2.VideoWriter(output_video_path, 
+                         fourcc=parameters['fourcc'], 
+                         fps=parameters['fps'], 
+                         frameSize=(parameters['width'], parameters['height']),
+                         isColor=False)
+
+    # iterate over frames, convert each frame to grayscale and write it to the output video
+    while True:
+        ret, frame = vc.read()
         if not ret:
             break
-        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        out.write(gray_frame)
-
-    cap.release()
-    out.release()
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        vw.write(frame)
+    
+    # close all captures and windows
+    vc.release()
+    vw.release()
     cv2.destroyAllWindows()
-
 
 def convert_video_to_black_and_white(input_video_path: str,
                                      output_video_path: str) -> None:
@@ -79,37 +88,35 @@ def convert_video_to_black_and_white(input_video_path: str,
         input_video_path: str. Path to input video.
         output_video_path: str. Path to output video.
 
+    Additional References:
+    (1) What are fourcc parameters:
+    https://docs.microsoft.com/en-us/windows/win32/medfound/video-fourccs
+
     """
-    cap = cv2.VideoCapture(input_video_path)
+    # open input video
+    vc = cv2.VideoCapture(input_video_path)
+    parameters = get_video_parameters(vc)
 
-    # Get input video parameters
-    parameters = get_video_parameters(cap)
-
-    # Define output video codec and initialize output video writer
-    out = cv2.VideoWriter(output_video_path, parameters['fourcc'],
-                                             parameters['fps'],
-                                            (parameters['width'], parameters['height']))
-
+    # open output video
+    vw = cv2.VideoWriter(output_video_path,
+                            fourcc=parameters['fourcc'],
+                            fps=parameters['fps'],
+                            frameSize=(parameters['width'], parameters['height']),
+                            isColor=True)
+    
+    # iterate over frames, convert each frame to black and white and write it to the output video
     while True:
-        ret, frame = cap.read()
+        ret, frame = vc.read()
         if not ret:
             break
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        _, frame = cv2.threshold(frame, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+        vw.write(frame)
 
-        # Convert frame to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Apply Otsu's thresholding to get binary image
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-
-        # Convert binary image to RGB
-        binary = cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB)
-
-        # Write the new frame to the output video
-        out.write(binary)
-
-    # Release everything
-    cap.release()
-    out.release()
+    # close all captures and windows
+    vc.release()
+    vw.release()
     cv2.destroyAllWindows()
 
 
@@ -144,7 +151,7 @@ def convert_video_to_sobel(input_video_path: str,
                             fourcc=parameters['fourcc'],
                             fps=parameters['fps'],
                             frameSize=(parameters['width'], parameters['height']),
-                            isColor=False)
+                            isColor=True)
     
     # iterate over frames, convert each frame to sobel map and write it to the output video
     while True:
@@ -161,6 +168,7 @@ def convert_video_to_sobel(input_video_path: str,
     vc.release()
     vw.release()
     cv2.destroyAllWindows()
+
 
 def main():
     convert_video_to_grayscale(INPUT_VIDEO, GRAYSCALE_VIDEO)

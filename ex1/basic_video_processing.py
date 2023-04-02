@@ -171,33 +171,10 @@ def convert_video_to_sobel(input_video_path: str,
     vw.release()
     cv2.destroyAllWindows()
 
-def display_video(input_video_path: str) -> None:
-    """Display the video without any processing.
-
-    Args:
-        input_video_path: str. Path to input video.
-    """
-    cap = cv2.VideoCapture(input_video_path)
-
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        cv2.imshow('frame', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
 def main():
-    # convert_video_to_grayscale(INPUT_VIDEO, GRAYSCALE_VIDEO)
-    # convert_video_to_black_and_white(INPUT_VIDEO, BLACK_AND_WHITE_VIDEO)
-    # convert_video_to_sobel(INPUT_VIDEO, SOBEL_VIDEO)
-
-    display_video(INPUT_VIDEO)
-
+    convert_video_to_grayscale(INPUT_VIDEO, GRAYSCALE_VIDEO)
+    convert_video_to_black_and_white(INPUT_VIDEO, BLACK_AND_WHITE_VIDEO)
+    convert_video_to_sobel(INPUT_VIDEO, SOBEL_VIDEO)
 
 
 if __name__ == "__main__":

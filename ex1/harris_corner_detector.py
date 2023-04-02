@@ -17,8 +17,8 @@ BUTTERFLY_IMAGE = '/home/yuval/repos/VP2023/ex1/butterfly.jpg'
 
 # Do not change the following constants:
 # input images:
-CHECKERBOARD_IMAGE = 'checkerboard.jpg'
-GIRAFFE_IMAGE = 'giraffe.jpg'
+CHECKERBOARD_IMAGE = '/home/yuval/repos/VP2023/ex1/checkerboard.jpg'
+GIRAFFE_IMAGE = '/home/yuval/repos/VP2023/ex1/giraffe.jpg'
 # result images:
 TEST_BLOCKS_FUNCTIONS_IMAGE = f'{ID1}_{ID2}_test_tiles_funcs.png'
 IMAGE_AND_CORNERS = f'{ID1}_{ID2}_image_corners.png'
@@ -36,8 +36,7 @@ def bgr_image_to_rgb_image(bgr_image: np.ndarray) -> np.ndarray:
         rgb_image: np.ndarray of shape: (height, width, 3). Take the input
         image and in the third dimension, swap the first and last slices.
     """
-    rgb_image = bgr_image.copy()
-    return rgb_image[:, :, [2, 0]]
+    return bgr_image[:, :, [2, 1, 0]]
 
 
 def black_and_white_image_to_tiles(arr: np.ndarray, nrows: int,
@@ -143,11 +142,40 @@ def create_grad_x_and_grad_y(
         nof_color_channels = 3
         height, width, _ = input_image.shape
 
-    """INSERT YOUR CODE HERE.
-    REPLACE THE VALUES FOR Ix AND Iy WITH THE GRADIENTS YOU COMPUTED.
-    """
-    Ix = np.random.uniform(size=(height, width))
-    Iy = np.random.uniform(size=(height, width))
+
+    # Get image dimensions
+    if len(input_image.shape) == 2:
+        # this is the case of a black and white image
+        height, width = input_image.shape
+    else:
+        # this is the case of an RGB image
+        height, width, _ = input_image.shape
+
+    # Convert to grayscale if needed
+    if input_image.ndim == 3:
+        input_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
+
+    # Convert the image to float type
+    input_image = input_image.astype(np.float32)
+
+    # Shift the image right by 1 column and fill the first column with zeros
+    shifted_right = np.zeros_like(input_image)
+    shifted_right[:, 1:] = input_image[:, :-1]
+    
+    # Compute Ix as the difference between the grayscale image and the shifted image
+    Ix = input_image - shifted_right
+
+    # Shift the image down by 1 row and fill the first row with zeros
+    shifted_down = np.zeros_like(input_image)
+    shifted_down[1:, :] = input_image[:-1, :]
+    
+    # Compute Iy as the difference between the grayscale image and the shifted image
+    Iy = input_image - shifted_down
+
+    # Remove the first column and the first row from both Ix and Iy
+    Ix = Ix[1:, 1:]
+    Iy = Iy[1:, 1:]
+
     return Ix, Iy
 
 
@@ -178,11 +206,17 @@ def calculate_response_image(input_image: np.ndarray, K: float) -> np.ndarray:
     # compute Ix and Iy
     Ix, Iy = create_grad_x_and_grad_y(input_image)
 
-    """INSERT YOUR CODE HERE.
-    REPLACE THE resonse_image WITH THE RESPONSE IMAGE YOU CALCULATED."""
+    # compute Sxx, Syy, Sxy
+    Sxx = signal.convolve2d(np.square(Ix), np.ones((5, 5)), mode='same')
+    Syy = signal.convolve2d(np.square(Iy), np.ones((5, 5)), mode='same')
+    Sxy = signal.convolve2d(np.multiply(Ix, Iy), np.ones((5, 5)), mode='same')
 
-    response_image = np.random.uniform(size=Ix.shape)
-    return response_image
+    # compute det(M) and trace(M)
+    det_M = np.multiply(Sxx, Syy) - np.square(Sxy)
+    trace_M = Sxx + Syy
+
+    # compute R
+    return det_M - K * np.square(trace_M)
 
 
 def our_harris_corner_detector(input_image: np.ndarray, K: float,
@@ -293,17 +327,17 @@ def create_corner_plots(black_and_white_image: np.ndarray,
 
 
 def main(to_save: bool = False) -> None:
-    test_tiles_functions(to_save)
+    # test_tiles_functions(to_save)
     # Read checkerboard image as grayscale
     checkerboard = cv2.imread(CHECKERBOARD_IMAGE, 0)
     # Read giraffe image
     giraffe = cv2.imread(GIRAFFE_IMAGE)
 
     # checkerboard response image
-    checkerboard_response_image = calculate_response_image(checkerboard, K)
-    plot_response_for_black_an_white_image(checkerboard,
-                                           checkerboard_response_image,
-                                           to_save)
+    # checkerboard_response_image = calculate_response_image(checkerboard, K)
+    # plot_response_for_black_an_white_image(checkerboard,
+    #                                        checkerboard_response_image,
+    #                                        to_save)
 
     # giraffe response image
     giraffe_response_image = calculate_response_image(giraffe, K)

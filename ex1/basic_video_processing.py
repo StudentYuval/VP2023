@@ -8,7 +8,7 @@ import numpy as np
 ID1 = '206299463'
 ID2 = '312497084'
 
-INPUT_VIDEO = '/home/yuval/repos/VP2023/ex1/atrium.avi'
+INPUT_VIDEO = 'atrium.avi'
 GRAYSCALE_VIDEO = f'{ID1}_{ID2}_atrium_grayscale.avi'
 BLACK_AND_WHITE_VIDEO = f'{ID1}_{ID2}_atrium_black_and_white.avi'
 SOBEL_VIDEO = f'{ID1}_{ID2}_atrium_sobel.avi'
@@ -56,10 +56,6 @@ def convert_video_to_grayscale(input_video_path: str,
             break
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         out.write(gray_frame)
-
-        cv2.imshow('frame', gray_frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
 
     cap.release()
     out.release()
@@ -110,11 +106,6 @@ def convert_video_to_black_and_white(input_video_path: str,
 
         # Write the new frame to the output video
         out.write(binary)
-
-        # Display the new frame
-        cv2.imshow('frame', binary)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
 
     # Release everything
     cap.release()

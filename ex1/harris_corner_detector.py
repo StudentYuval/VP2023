@@ -330,7 +330,7 @@ def create_corner_plots(black_and_white_image: np.ndarray,
 
 
 def main(to_save: bool = False) -> None:
-    # test_tiles_functions(to_save)
+    test_tiles_functions(to_save)
     # Read checkerboard image as grayscale
     checkerboard = cv2.imread(CHECKERBOARD_IMAGE, 0)
     # Read giraffe image

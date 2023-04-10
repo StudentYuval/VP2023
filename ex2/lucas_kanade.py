@@ -3,6 +3,7 @@ import numpy as np
 from tqdm import tqdm
 from scipy import signal
 from scipy.interpolate import griddata
+import math
 
 
 # FILL IN YOUR ID
@@ -193,10 +194,35 @@ def warp_image(image: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
     Returns:
         image_warp: np.ndarray. Warped image.
     """
-    image_warp = image.copy()
-    """INSERT YOUR CODE HERE.
-    Replace image_warp with something else.
-    """
+    h, w = image.shape[:2]
+
+    # Resize u and v to the shape of the image
+    u_resized = cv2.resize(u, (w, h))
+    v_resized = cv2.resize(v, (w, h))
+
+    # Normalize the shift values according to a factor
+    u_factor = w / u.shape[1]
+    v_factor = h / u.shape[0]
+    u_resized *= u_factor
+    v_resized *= v_factor
+
+    # Define the grid points
+    x, y = np.meshgrid(np.arange(w), np.arange(h))
+    grid_points = np.column_stack((x.flatten(), y.flatten()))
+
+    # Define the points to interpolate
+    interp_points = grid_points + np.column_stack((u_resized.flatten(), v_resized.flatten()))
+
+    # Warp the image using griddata
+    image_flat = image.flatten()
+    image_warp_flat = griddata(interp_points, image_flat, grid_points, method='linear', fill_value=np.nan)
+
+    # Reshape the warped image
+    image_warp = image_warp_flat.reshape(h, w)
+
+    # Fill nan holes with the source image values
+    image_warp[np.isnan(image_warp)] = image[np.isnan(image_warp)]
+
     return image_warp
 
 
@@ -312,8 +338,78 @@ def lucas_kanade_video_stabilization(input_video_path: str,
        (7) Do not forget to gracefully close all VideoCapture and to destroy
        all windows.
     """
-    """INSERT YOUR CODE HERE."""
-    pass
+    cap = cv2.VideoCapture(input_video_path)
+    if not cap.isOpened():
+        print(f"Error: Unable to open video file {input_video_path}")
+        return
+
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+
+    # (2) Create an output video VideoCapture object
+    out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height), isColor=True)
+
+    # (3) Convert the first frame to grayscale and write it as-is to the output video
+    ret, frame = cap.read()
+    if not ret:
+        print("Error: Unable to read the first frame")
+        cap.release()
+        return
+
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    out.write(frame)
+
+    # (4) Resize the first frame
+    scale = 2**(num_levels - 1)
+    resized_height = math.ceil(height / scale) * scale
+    resized_width = math.ceil(width / scale) * scale
+    gray_frame_resized = cv2.resize(gray_frame, (resized_width, resized_height))
+
+    # (5) Create u and v of the size of the image
+    u = np.zeros_like(gray_frame_resized, dtype=np.float32)
+    v = np.zeros_like(gray_frame_resized, dtype=np.float32)
+
+    # (6) Loop over the frames in the input video
+    for _ in tqdm(range(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) - 1), desc="Processing video"):
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # (6.1) Resize the current frame
+        gray_frame_next = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray_frame_next_resized = cv2.resize(gray_frame_next, (resized_width, resized_height))
+
+        # (6.2) Feed them to the lucas_kanade_optical_flow with the previous frame
+        du, dv = lucas_kanade_optical_flow(gray_frame_resized, gray_frame_next_resized, window_size, max_iter, num_levels)
+
+        # (6.3) Compute their mean values over the valid computation region
+        half_win_size = window_size // 2
+        mean_du = np.mean(du[half_win_size:-half_win_size, half_win_size:-half_win_size])
+        mean_dv = np.mean(dv[half_win_size:-half_win_size, half_win_size:-half_win_size])
+
+        # (6.4) Update u and v to their mean values inside the valid computation region
+        u[half_win_size:-half_win_size, half_win_size:-half_win_size] += mean_du
+        v[half_win_size:-half_win_size, half_win_size:-half_win_size] += mean_dv
+
+        # (6.5) Add the u and v shift from the previous frame diff
+        u += mean_du
+        v += mean_dv
+
+                # (6.6) Save the updated u and v for the next frame
+        gray_frame_resized = gray_frame_next_resized.copy()
+
+        # (6.7) Finally, warp the current frame with the u and v you have at hand
+        warped_frame = warp_image(frame, u, v)
+
+        # (6.8) Write the warped frame to the output video
+        out.write(warped_frame)
+
+    # (7) Gracefully close all VideoCapture and destroy all windows
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()
 
 
 def faster_lucas_kanade_step(I1: np.ndarray,
@@ -399,8 +495,80 @@ def lucas_kanade_faster_video_stabilization(
     Returns:
         None.
     """
-    """INSERT YOUR CODE HERE."""
-    pass
+# Open a VideoCapture object for the input video and read its parameters
+    cap = cv2.VideoCapture(input_video_path)
+    if not cap.isOpened():
+        print(f"Error: Unable to open video file {input_video_path}")
+        return
+
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+
+    # Create an output video VideoCapture object
+    out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height), isColor=True)
+
+    # Convert the first frame to grayscale and write it as-is to the output video
+    ret, frame = cap.read()
+    if not ret:
+        print("Error: Unable to read the first frame")
+        cap.release()
+        return
+
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    out.write(frame)
+
+    # Resize the first frame
+    scale = 2**(num_levels - 1)
+    resized_height = math.ceil(height / scale) * scale
+    resized_width = math.ceil(width / scale) * scale
+    gray_frame_resized = cv2.resize(gray_frame, (resized_width, resized_height))
+
+    # Create u and v of the size of the image
+    u = np.zeros_like(gray_frame_resized, dtype=np.float32)
+    v = np.zeros_like(gray_frame_resized, dtype=np.float32)
+
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Loop over the frames in the input video
+    for idx in tqdm(range(1, frame_count), desc="Processing video"):
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Resize the current frame
+        gray_frame_next = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray_frame_next_resized = cv2.resize(gray_frame_next, (resized_width, resized_height))
+
+        if idx % step == 0:
+            # Feed the frames to the lucas_kanade_optical_flow function
+            du, dv = lucas_kanade_optical_flow(gray_frame_resized, gray_frame_next_resized, window_size, max_iter, num_levels)
+
+            # Compute their mean values over the valid computation region
+            half_win_size = window_size // 2
+            mean_du = np.mean(du[half_win_size:-half_win_size, half_win_size:-half_win_size])
+            mean_dv = np.mean(dv[half_win_size:-half_win_size, half_win_size:-half_win_size])
+
+            # Update u and v to their mean values inside the valid computation region
+            u[half_win_size:-half_win_size, half_win_size:-half_win_size] += mean_du
+            v[half_win_size:-half_win_size, half_win_size:-half_win_size] += mean_dv
+            
+            # Save the updated u and v for the next frame
+            gray_frame_resized = gray_frame_next_resized.copy()
+
+        # Warp the current frame with the u and v you have at hand
+        warped_frame = warp_image(frame, u, v)
+
+        # Write the warped frame to the output video
+        out.write(warped_frame)
+
+    # Gracefully close all VideoCapture and destroy all windows
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()
+
+
 
 
 def lucas_kanade_faster_video_stabilization_fix_effects(
@@ -423,7 +591,55 @@ def lucas_kanade_faster_video_stabilization_fix_effects(
     Returns:
         None.
     """
-    """INSERT YOUR CODE HERE."""
-    pass
+    # Open a VideoCapture object of the input video and read its parameters
+    cap = cv2.VideoCapture(input_video_path)
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+    # Create an output video VideoCapture object with the same parameters as in input video
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_video_path, fourcc, fps, (width - start_cols - end_cols, height - start_rows - end_rows))
 
+    # Loop over the frames in the input video
+    ret, frame = cap.read()
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Write the first frame as-is to the output video
+    cropped_frame = frame[start_rows:-end_rows, start_cols:-end_cols]
+    out.write(cropped_frame)
+
+    # Initialize u and v to zero
+    u = np.zeros_like(gray_frame, dtype=np.float32)
+    v = np.zeros_like(gray_frame, dtype=np.float32)
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        gray_frame_next = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # Calculate the optical flow
+        du, dv = lucas_kanade_optical_flow(gray_frame, gray_frame_next, window_size, max_iter, num_levels)
+
+        # Update u and v with the optical flow results
+        u += du
+        v += dv
+
+        # Warp the current frame using u and v
+        warped_frame = warp_image(frame, u, v)
+
+        # Crop the warped frame to remove the stabilization side effects
+        cropped_warped_frame = warped_frame[start_rows:-end_rows, start_cols:-end_cols]
+
+        # Write the cropped warped frame to the output video
+        out.write(cropped_warped_frame)
+
+        # Update the current frame
+        gray_frame = gray_frame_next.copy()
+
+    # Gracefully close all VideoCapture and destroy all windows
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()

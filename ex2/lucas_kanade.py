@@ -63,8 +63,21 @@ def build_pyramid(image: np.ndarray, num_levels: int) -> list[np.ndarray]:
     You are not allowed to use cv2 PyrDown here (or any other cv2 method).
     We use a slightly different decimation process from this function.
     """
+    PYRAMID_FILTER = np.array([[1, 4, 6, 4, 1]]) / 16
+    
     pyramid = [image.copy()]
-    """INSERT YOUR CODE HERE."""
+    
+    for _ in range(num_levels):
+        # Convolve the PYRAMID_FILTER with the previous image in the pyramid
+        filtered_image = signal.convolve2d(pyramid[-1], PYRAMID_FILTER, boundary='symm', mode='same')
+        filtered_image = signal.convolve2d(filtered_image, PYRAMID_FILTER.T, boundary='symm', mode='same')
+        
+        # Decimate the result by picking every second entry
+        decimated_image = filtered_image[::2, ::2]
+        
+        # Add the decimated image to the pyramid
+        pyramid.append(decimated_image)
+    
     return pyramid
 
 
@@ -104,11 +117,50 @@ def lucas_kanade_step(I1: np.ndarray,
         original image. dv encodes the optical flow parameters in rows and du
         in columns.
     """
-    """INSERT YOUR CODE HERE.
-    Calculate du and dv correctly.
-    """
+    # Define the Ix, Iy filters
+    Ix_filter = np.array([[-1, 1], [-1, 1]]) / 4
+    Iy_filter = np.array([[-1, -1], [1, 1]]) / 4
+
+    # Compute Ix, Iy, and It
+    Ix = signal.convolve2d(I2, Ix_filter, mode='same', boundary='symm')
+    Iy = signal.convolve2d(I2, Iy_filter, mode='same', boundary='symm')
+    It = I2 - I1
+
+    # Initialize du and dv with zeros
     du = np.zeros(I1.shape)
     dv = np.zeros(I1.shape)
+
+    # Compute the half window size
+    half_window = window_size // 2
+
+    # Loop over all pixels (ignoring boundary pixels)
+    for y in range(half_window, I1.shape[0] - half_window):
+        for x in range(half_window, I1.shape[1] - half_window):
+
+            # Extract the window from Ix, Iy, and It
+            Ix_window = Ix[y - half_window:y + half_window + 1, x - half_window:x + half_window + 1]
+            Iy_window = Iy[y - half_window:y + half_window + 1, x - half_window:x + half_window + 1]
+            It_window = It[y - half_window:y + half_window + 1, x - half_window:x + half_window + 1]
+
+            # Calculate A, the matrix of stacked gradients
+            A = np.stack((Ix_window.flatten(), Iy_window.flatten()), axis=-1)
+
+            # Calculate b, the matrix of stacked temporal gradients
+            b = -It_window.flatten()
+
+            # Solve the least-squares problem: A * [du, dv] = b
+            try:
+                du_window, dv_window = np.linalg.lstsq(A, b, rcond=None)[0]
+            except np.linalg.LinAlgError:
+                # If the solution does not converge, keep this pixel's (u, v) as zero
+                du_window, dv_window = 0, 0
+
+            # Update du and dv at the current pixel
+            du[y, x] = du_window
+            dv[y, x] = dv_window
+
+    return du, dv
+
     return du, dv
 
 

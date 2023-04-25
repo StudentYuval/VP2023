@@ -127,6 +127,8 @@ img.save(fp=os.path.join(RIVER_DIR, '2_after_one_lk_step.gif'),
 ######################### ONE STEP LUCAS KANADE ENDS HERE ######################
 ################################################################################
 
+print("working on full flow...")
+
 # calculate LK optical flow:
 start_time = time.time()
 (u, v) = lucas_kanade_optical_flow(I1, I2, WINDOW_SIZE_RIVER, MAX_ITER_RIVER,

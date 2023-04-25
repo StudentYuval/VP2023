@@ -63,8 +63,14 @@ def build_pyramid(image: np.ndarray, num_levels: int) -> list[np.ndarray]:
     You are not allowed to use cv2 PyrDown here (or any other cv2 method).
     We use a slightly different decimation process from this function.
     """
-    pyramid = [image.copy()]
-    """INSERT YOUR CODE HERE."""
+    cur_image: np.ndarray = image.copy()
+    pyramid = [cur_image]
+    
+    for i in range(num_levels):
+        cur_image = signal.convolve2d(cur_image, PYRAMID_FILTER, mode='same')
+        cur_image = cur_image[::2, ::2]
+        pyramid.append(cur_image.copy())
+
     return pyramid
 
 
@@ -87,7 +93,7 @@ def lucas_kanade_step(I1: np.ndarray,
       (3.2) Loop over all pixels in the image (you can ignore boundary pixels up
       to ~window_size/2 pixels in each side of the image [top, bottom,
       left and right]).
-      (3.3) For every pixel, pretend the pixel’s neighbors have the same (u,
+      (3.3) For every pixel, pretend the pixel's neighbors have the same (u,
       v). This means that for NxN window, we have N^2 equations per pixel.
       (3.4) Solve for (u, v) using Least-Squares solution. When the solution
       does not converge, keep this pixel's (u, v) as zero.
@@ -109,6 +115,36 @@ def lucas_kanade_step(I1: np.ndarray,
     """
     du = np.zeros(I1.shape)
     dv = np.zeros(I1.shape)
+
+    Ix = signal.convolve2d(I2, X_DERIVATIVE_FILTER, mode='same')
+    Iy = signal.convolve2d(I2, Y_DERIVATIVE_FILTER, mode='same')
+    It = I2 - I1
+
+    nrows = I1.shape[0]
+    ncols = I1.shape[1]
+    for row in range(window_size//2, nrows - window_size//2):
+        for col in range(window_size//2, ncols - window_size//2):
+            Ix_window = Ix[(row - window_size//2):(row + window_size//2 + 1), (col - window_size//2):(col + window_size//2 + 1)]
+            Iy_window = Iy[(row - window_size//2):(row + window_size//2 + 1), (col - window_size//2):(col + window_size//2 + 1)]
+            It_window = It[(row - window_size//2):(row + window_size//2 + 1), (col - window_size//2):(col + window_size//2 + 1)]
+
+            A = np.vstack((Ix_window.flatten(), Iy_window.flatten())).T
+            b = -It_window.flatten()
+
+            EPSILON = 1e-3
+            try:
+                sol = np.linalg.lstsq(A, b, rcond=None)
+                u, v = sol[0]
+                residuals = sol[1]
+                if residuals.size > 0:
+                    if residuals[0] > EPSILON:
+                        u, v = 0, 0
+            except np.linalg.LinAlgError: # doesn't converge
+                u, v = 0, 0
+
+            du[row, col] = u
+            dv[row, col] = v
+
     return du, dv
 
 
@@ -141,10 +177,35 @@ def warp_image(image: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
     Returns:
         image_warp: np.ndarray. Warped image.
     """
-    image_warp = image.copy()
-    """INSERT YOUR CODE HERE.
-    Replace image_warp with something else.
-    """
+    image_warp = np.zeros(image.shape)
+    nrows = image.shape[0]
+    ncols = image.shape[1]
+
+    # calculate normalization factors for u,v
+    factor_u = ncols / u.shape[1]
+    factor_v = nrows / v.shape[0]
+
+    # resize u,v to the shape of the image
+    u = factor_u*cv2.resize(u, (ncols, nrows))
+    v = factor_v*cv2.resize(v, (ncols, nrows))
+
+    # define grid points
+    x: np.ndarray
+    y: np.ndarray
+    x, y = np.meshgrid(np.arange(ncols), np.arange(nrows))
+    grid_points = np.vstack((x.flatten(), y.flatten())).T
+
+    # define points to interpolate
+    points = np.vstack((x.flatten() + u.flatten(), y.flatten() + v.flatten())).T
+
+    # interpolate
+    image_warp = griddata(points, image.flatten(), grid_points, method='linear', fill_value=np.nan)
+    image_warp = image_warp.reshape(image.shape)
+
+    # fill nan holes
+    nan_inds = np.isnan(image_warp)
+    image_warp[nan_inds] = image[nan_inds]
+
     return image_warp
 
 
@@ -186,9 +247,7 @@ def lucas_kanade_optical_flow(I1: np.ndarray,
           image resize (using cv2.resize) to the next pyramid level resolution
           and scale u and v accordingly.
     """
-    """INSERT YOUR CODE HERE.
-        Replace image_warp with something else.
-        """
+    # resize I1, I2 to prepare for the decimations pyramid:
     h_factor = int(np.ceil(I1.shape[0] / (2 ** (num_levels - 1 + 1))))
     w_factor = int(np.ceil(I1.shape[1] / (2 ** (num_levels - 1 + 1))))
     IMAGE_SIZE = (w_factor * (2 ** (num_levels - 1 + 1)),
@@ -201,12 +260,25 @@ def lucas_kanade_optical_flow(I1: np.ndarray,
     pyramid_I1 = build_pyramid(I1, num_levels)
     pyarmid_I2 = build_pyramid(I2, num_levels)
     # start from u and v in the size of smallest image
-    u = np.zeros(pyarmid_I2[-1].shape)
-    v = np.zeros(pyarmid_I2[-1].shape)
-    """INSERT YOUR CODE HERE.
-       Replace u and v with their true value."""
-    u = np.zeros(I1.shape)
-    v = np.zeros(I1.shape)
+    u = np.zeros(pyramid_I1[-1].shape)
+    v = np.zeros(pyramid_I1[-1].shape)
+
+    for i in range(num_levels):
+        # warp I2 according to the current u and v
+        I2_warp = warp_image(pyarmid_I2[-(i + 1)], u, v)
+        for j in range(max_iter):
+            # perform a lucas kanade step
+            u, v = lucas_kanade_step(pyramid_I1[-(i + 1)],
+                                              I2_warp,
+                                              window_size)
+            I2_warp = warp_image(I2_warp, u, v)
+
+        if i != num_levels - 1:
+            # resize u and v to the next pyramid level resolution
+            u = cv2.resize(u, pyarmid_I2[-(i + 2)].shape[::-1])
+            v = cv2.resize(v, pyarmid_I2[-(i + 2)].shape[::-1])
+    
+    
     return u, v
 
 

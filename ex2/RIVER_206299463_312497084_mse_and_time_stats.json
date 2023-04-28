@@ -1,0 +1,8 @@
+{
+    "[RIVER, TIME] One Step LK": 4.213423252105713,
+    "[RIVER, MSE] Original video": 363.15032958984375,
+    "[RIVER, MSE] One Step LK": 298.93695068359375,
+    "[RIVER, TIME] Full LK": 41.43659043312073,
+    "[RIVER, MSE] Full LK": 40.63826370239258,
+    "[RIVER, MSE] Full to Original Ratio": 8.936167456594935
+}

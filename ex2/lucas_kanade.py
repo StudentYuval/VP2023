@@ -3,6 +3,7 @@ import numpy as np
 from tqdm import tqdm
 from scipy import signal
 from scipy.interpolate import griddata
+import scipy.ndimage as ndimage
 
 
 # FILL IN YOUR ID
@@ -21,6 +22,13 @@ X_DERIVATIVE_FILTER = np.array([[1, 0, -1],
 Y_DERIVATIVE_FILTER = X_DERIVATIVE_FILTER.copy().transpose()
 
 WINDOW_SIZE = 5
+
+def fourcc_to_str(fourcc: int):
+    fourcc_str = ''
+    while fourcc > 0:
+        fourcc_str += chr(fourcc & 0xFF)
+        fourcc >>= 8
+    return fourcc_str
 
 
 def get_video_parameters(capture: cv2.VideoCapture) -> dict:
@@ -42,7 +50,7 @@ def get_video_parameters(capture: cv2.VideoCapture) -> dict:
             "frame_count": frame_count}
 
 
-def build_pyramid(image: np.ndarray, num_levels: int) -> list[np.ndarray]:
+def build_pyramid(image: np.ndarray, num_levels: int, boundary='symm', mode='same') -> list[np.ndarray]:
     """Coverts image to a pyramid list of size num_levels.
 
     First, create a list with the original image in it. Then, iterate over the
@@ -63,16 +71,27 @@ def build_pyramid(image: np.ndarray, num_levels: int) -> list[np.ndarray]:
     You are not allowed to use cv2 PyrDown here (or any other cv2 method).
     We use a slightly different decimation process from this function.
     """
-    cur_image: np.ndarray = image.copy()
+    cur_image: np.ndarray = image.copy().astype(np.float64)
     pyramid = [cur_image]
     
     for i in range(num_levels):
-        cur_image = signal.convolve2d(cur_image, PYRAMID_FILTER, mode='same')
+        cur_image = signal.convolve2d(cur_image, PYRAMID_FILTER, boundary=boundary, mode=mode)
         cur_image = cur_image[::2, ::2]
         pyramid.append(cur_image.copy())
 
     return pyramid
 
+def show_pyramid(pyramid: list[np.ndarray], num_levels: int, image_id: int):
+    import matplotlib.pyplot as plt
+    fig, axs = plt.subplots(1, num_levels + 1, tight_layout=True, figsize=(10, 5))
+    axs = axs.flatten()
+    for i in range(num_levels + 1):
+        axs[i].imshow(pyramid[i], cmap='gray')
+        axs[i].axis(False)
+        axs[i].set_title(f'Level {i}')
+    fig.suptitle(f"Pyramid progression of $I_{image_id}$")    
+    # fig.savefig(f'pyramid_{image_id}.png', dpi=300)
+    plt.show()
 
 def lucas_kanade_step(I1: np.ndarray,
                       I2: np.ndarray,
@@ -110,37 +129,39 @@ def lucas_kanade_step(I1: np.ndarray,
         original image. dv encodes the optical flow parameters in rows and du
         in columns.
     """
-    """INSERT YOUR CODE HERE.
-    Calculate du and dv correctly.
-    """
-    du = np.zeros(I1.shape)
-    dv = np.zeros(I1.shape)
+    du = np.zeros(I1.shape, dtype=np.float64)
+    dv = np.zeros(I1.shape, dtype=np.float64)
 
-    Ix = signal.convolve2d(I2, X_DERIVATIVE_FILTER, mode='same')
-    Iy = signal.convolve2d(I2, Y_DERIVATIVE_FILTER, mode='same')
+    Ix = signal.convolve2d(I2, X_DERIVATIVE_FILTER, boundary='symm', mode='same')
+    Iy = signal.convolve2d(I2, Y_DERIVATIVE_FILTER, boundary='symm', mode='same')
     It = I2 - I1
 
     nrows = I1.shape[0]
     ncols = I1.shape[1]
-    for row in range(window_size//2, nrows - window_size//2):
-        for col in range(window_size//2, ncols - window_size//2):
-            Ix_window = Ix[(row - window_size//2):(row + window_size//2 + 1), (col - window_size//2):(col + window_size//2 + 1)]
-            Iy_window = Iy[(row - window_size//2):(row + window_size//2 + 1), (col - window_size//2):(col + window_size//2 + 1)]
-            It_window = It[(row - window_size//2):(row + window_size//2 + 1), (col - window_size//2):(col + window_size//2 + 1)]
+    for row in range(window_size//2, nrows-window_size//2-1):
+        for col in range(window_size//2, ncols-window_size//2-1):
+            Ix_window = Ix[row-window_size//2:row+window_size//2+1, col-window_size//2:col+window_size//2+1]
+            Iy_window = Iy[row-window_size//2:row+window_size//2+1, col-window_size//2:col+window_size//2+1]
+            It_window = It[row-window_size//2:row+window_size//2+1, col-window_size//2:col+window_size//2+1]
 
             A = np.vstack((Ix_window.flatten(), Iy_window.flatten())).T
-            b = -It_window.flatten()
-
-            EPSILON = 1e-3
+            b = -1 * It_window.flatten()
+            
             try:
-                sol = np.linalg.lstsq(A, b, rcond=None)
-                u, v = sol[0]
-                residuals = sol[1]
-                if residuals.size > 0:
-                    if residuals[0] > EPSILON:
-                        u, v = 0, 0
-            except np.linalg.LinAlgError: # doesn't converge
-                u, v = 0, 0
+                A_T_A = A.T @ A
+                A_T_b = A.T @ b
+              
+                tau = 1e8
+                cond_num = np.linalg.cond(A_T_A)
+                
+                if cond_num > tau:
+                    u, v = (0, 0)
+                else:
+                    A_T_A_inv = np.linalg.inv(A_T_A)
+                    u, v = A_T_A_inv @ A_T_b
+                
+            except:
+                u, v = (0, 0)
 
             du[row, col] = u
             dv[row, col] = v
@@ -148,7 +169,7 @@ def lucas_kanade_step(I1: np.ndarray,
     return du, dv
 
 
-def warp_image(image: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
+def warp_image(image: np.ndarray, u: np.ndarray, v: np.ndarray, mode: str = 'remap') -> np.ndarray:
     """Warp image using the optical flow parameters in u and v.
 
     Note that this method needs to support the case where u and v shapes do
@@ -177,37 +198,33 @@ def warp_image(image: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
     Returns:
         image_warp: np.ndarray. Warped image.
     """
-    image_warp = np.zeros(image.shape)
-    nrows = image.shape[0]
-    ncols = image.shape[1]
+    image_warp = np.zeros(image.shape, dtype=np.float64)
+    if mode == 'remap':
+        h = image.shape[0]
+        w = image.shape[1]
 
-    # calculate normalization factors for u,v
-    factor_u = ncols / u.shape[1]
-    factor_v = nrows / v.shape[0]
+        # resize u,v to the shape of the image
+        if u.shape != image.shape:
+            factor_u = w / u.shape[1]
+            factor_v = h / v.shape[0]
+            u = factor_u*cv2.resize(u, (w, h))
+            v = factor_v*cv2.resize(v, (w, h))
 
-    # resize u,v to the shape of the image
-    u = factor_u*cv2.resize(u, (ncols, nrows))
-    v = factor_v*cv2.resize(v, (ncols, nrows))
-
-    # define grid points
-    x: np.ndarray
-    y: np.ndarray
-    x, y = np.meshgrid(np.arange(ncols), np.arange(nrows))
-    grid_points = np.vstack((x.flatten(), y.flatten())).T
-
-    # define points to interpolate
-    points = np.vstack((x.flatten() + u.flatten(), y.flatten() + v.flatten())).T
-
-    # interpolate
-    image_warp = griddata(points, image.flatten(), grid_points, method='linear', fill_value=np.nan)
-    image_warp = image_warp.reshape(image.shape)
+        h, w = image.shape[:2]
+        x, y = np.meshgrid(np.arange(w), np.arange(h))
+        map_x = (x + u).astype(np.float32)
+        map_y = (y + v).astype(np.float32)
+        image_warp = cv2.remap(image, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+    elif mode == 'shift':
+        ndimage.shift(image, (v, u), output=image_warp, order=3, mode='constant', cval=np.nan)
+    else:
+        raise ValueError('Invalid mode')
 
     # fill nan holes
     nan_inds = np.isnan(image_warp)
     image_warp[nan_inds] = image[nan_inds]
 
     return image_warp
-
 
 def lucas_kanade_optical_flow(I1: np.ndarray,
                               I2: np.ndarray,
@@ -247,40 +264,78 @@ def lucas_kanade_optical_flow(I1: np.ndarray,
           image resize (using cv2.resize) to the next pyramid level resolution
           and scale u and v accordingly.
     """
+    I1_ = I1.copy().astype(np.float64)
+    I2_ = I2.copy().astype(np.float64)
+    
     # resize I1, I2 to prepare for the decimations pyramid:
-    h_factor = int(np.ceil(I1.shape[0] / (2 ** (num_levels - 1 + 1))))
-    w_factor = int(np.ceil(I1.shape[1] / (2 ** (num_levels - 1 + 1))))
-    IMAGE_SIZE = (w_factor * (2 ** (num_levels - 1 + 1)),
-                  h_factor * (2 ** (num_levels - 1 + 1)))
-    if I1.shape != IMAGE_SIZE:
-        I1 = cv2.resize(I1, IMAGE_SIZE)
-    if I2.shape != IMAGE_SIZE:
-        I2 = cv2.resize(I2, IMAGE_SIZE)
+    K = int(np.ceil(I1_.shape[0]/(2**(num_levels - 1 + 1))))
+    M = int(np.ceil(I1_.shape[1]/(2**(num_levels - 1 + 1))))
+    IMAGE_SIZE = (M*(2**(num_levels - 1 + 1)), K*(2**(num_levels - 1 + 1)))
+    if I1_.shape != IMAGE_SIZE:
+        I1_ = cv2.resize(I1, IMAGE_SIZE)
+    if I2_.shape != IMAGE_SIZE:
+        I2_ = cv2.resize(I2, IMAGE_SIZE)
+
     # create a pyramid from I1 and I2
-    pyramid_I1 = build_pyramid(I1, num_levels)
-    pyarmid_I2 = build_pyramid(I2, num_levels)
-    # start from u and v in the size of smallest image
-    u = np.zeros(pyramid_I1[-1].shape)
-    v = np.zeros(pyramid_I1[-1].shape)
+    pyramid_I1 = build_pyramid(I1_, num_levels)
+    pyramid_I2 = build_pyramid(I2_, num_levels)
 
-    for i in range(num_levels):
-        # warp I2 according to the current u and v
-        I2_warp = warp_image(pyarmid_I2[-(i + 1)], u, v)
-        for j in range(max_iter):
-            # perform a lucas kanade step
-            u, v = lucas_kanade_step(pyramid_I1[-(i + 1)],
-                                              I2_warp,
-                                              window_size)
-            I2_warp = warp_image(I2_warp, u, v)
+    u = np.zeros(pyramid_I1[-1].shape, dtype=np.float64)
+    v = np.zeros(pyramid_I1[-1].shape, dtype=np.float64)
 
-        if i != num_levels - 1:
-            # resize u and v to the next pyramid level resolution
-            u = cv2.resize(u, pyarmid_I2[-(i + 2)].shape[::-1])
-            v = cv2.resize(v, pyarmid_I2[-(i + 2)].shape[::-1])
-    
-    
+    for i in range(num_levels, -1, -1):
+        warped_i2 = warp_image(pyramid_I2[i], u, v)
+        for _ in range(max_iter):
+            du, dv = lucas_kanade_step(pyramid_I1[i], warped_i2, window_size)
+            u += du
+            v += dv
+            warped_i2 = warp_image(pyramid_I2[i], u, v)
+        if i != 0:
+            h, w = pyramid_I2[i-1].shape
+            factor_u = w / u.shape[1]
+            factor_v = h / v.shape[0]
+            u = factor_u*cv2.resize(u, pyramid_I2[i-1].shape[::-1], )
+            v = factor_v*cv2.resize(v, pyramid_I2[i-1].shape[::-1])
     return u, v
 
+def resize_to_fit_decimation(shape: tuple, num_levels: int):
+    ''' calculates new shape for an image that will be decimated num_levels times
+        Note: the shape is in numpy format, exactly opposite of cv2 format
+        I use cv2.resize(image, new_shape[::-1]) to resize the image to the new shape,
+        as instructed in the recipe from the previous section
+    '''
+    K = int(np.ceil(shape[0]/(2**(num_levels - 1 + 1))))
+    M = int(np.ceil(shape[1]/(2**(num_levels - 1 + 1))))
+    new_shape = (K*(2**(num_levels - 1 + 1)), M*(2**(num_levels - 1 + 1)))
+    return new_shape
+        
+def read_and_fit_next_frame_from_video(vc: cv2.VideoCapture, new_shape: tuple[int, int]) -> np.ndarray:
+    ret, frame = vc.read()
+    if not ret:
+        None
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float64)
+    frame = cv2.resize(frame, new_shape[::-1])
+    return frame
+
+def write_frame_to_video(vw: cv2.VideoWriter, frame: np.ndarray, shape: tuple):
+    frame = cv2.resize(frame, shape[::-1])
+    vw.write(frame.astype(np.uint8))
+
+def save_frame_to_dir(frame: np.ndarray, frame_index: int):
+    cv2.imwrite(f'video_debug/frame_{frame_index}.png', frame.astype(np.uint8))
+
+def plot_U(U: tuple[np.ndarray, np.ndarray]):
+    import matplotlib.pyplot as plt
+    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+    axs = axs.flatten()
+
+    axs[0].imshow(U[0], cmap='gray')
+    axs[0].set_title('u')
+
+    axs[1].imshow(U[1], cmap='gray')
+    axs[1].set_title('v')
+
+    plt.show()
 
 def lucas_kanade_video_stabilization(input_video_path: str,
                                      output_video_path: str,
@@ -332,8 +387,64 @@ def lucas_kanade_video_stabilization(input_video_path: str,
        (7) Do not forget to gracefully close all VideoCapture and to destroy
        all windows.
     """
-    """INSERT YOUR CODE HERE."""
-    pass
+    # initialize video capture, video writer
+    vc = cv2.VideoCapture(input_video_path)
+    params = get_video_parameters(vc)
+    vw = cv2.VideoWriter(output_video_path, 
+                                fourcc=cv2.VideoWriter_fourcc(*'XVID'),
+                                fps=params['fps'],
+                                frameSize=(params['width'], params['height']),
+                                isColor=False
+                            )
+    
+    # read first frame, resize it, write it to video
+    orig_shape = (params['width'], params['height'])
+    new_shape = resize_to_fit_decimation(orig_shape, num_levels)
+
+    first_frame = read_and_fit_next_frame_from_video(vc, new_shape)
+    if first_frame is None:
+        raise ValueError('Could not read first frame from video, terminating.')
+    write_frame_to_video(vw, first_frame, orig_shape)
+
+    # define region of interest
+    start = window_size//2
+    end = -1 * (start)
+
+    u = np.zeros(new_shape, dtype=np.float64)
+    v = np.zeros(new_shape, dtype=np.float64)
+    prev_U = (u, v)
+
+    save_frame_to_dir(first_frame, 0)
+
+    prev_frame = first_frame
+    for i in tqdm(range(params['frame_count'] - 1)):
+    #for i in tqdm(range(10)):
+        frame = read_and_fit_next_frame_from_video(vc, new_shape)
+        if frame is None:
+            break # end of video arrived prematurely...
+        
+        cur_U = lucas_kanade_optical_flow(prev_frame, frame, window_size, max_iter, num_levels)
+        
+        cur_U[0][start:end,start:end] = cur_U[0][start:end, start:end].mean()
+        cur_U[1][start:end,start:end] = cur_U[1][start:end, start:end].mean()
+        prev_U[0][start:end,start:end] += cur_U[0][start:end, start:end]
+        prev_U[1][start:end,start:end] += cur_U[1][start:end, start:end]
+
+        #warped_frame = warp_image(frame, prev_U[0][start:end].mean(), prev_U[1][start:end].mean(), mode='shift')
+        warped_frame = warp_image(frame, prev_U[0], prev_U[1])
+
+        save_frame_to_dir(warped_frame, i + 1)
+
+        write_frame_to_video(vw, warped_frame, orig_shape)
+        prev_frame = frame # maybe prev_fame = warped_frame?
+
+    for i in range(21):
+        write_frame_to_video(vw, warped_frame, orig_shape)
+
+    vw.release()
+    vc.release()
+    cv2.destroyAllWindows()
+
 
 
 def faster_lucas_kanade_step(I1: np.ndarray,

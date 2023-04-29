@@ -13,9 +13,9 @@ ID1 = '206299463'
 ID2 = '312497084'
 
 # Choose parameters
-WINDOW_SIZE_TAU = 5  # Add your value here!
-MAX_ITER_TAU = 5  # Add your value here!
-NUM_LEVELS_TAU = 5  # Add your value here!
+WINDOW_SIZE_TAU = 5
+MAX_ITER_TAU = 8
+NUM_LEVELS_TAU = 5
 
 
 # Output dir and statistics file preparations:
@@ -54,7 +54,6 @@ def calc_mean_mse_video(path: str) -> float:
     input_cap.release()
     return float(mean_mse)
 
-
 # Load video file
 input_video_name = 'input.avi'
 
@@ -70,8 +69,6 @@ end_time = time.time()
 print(f'LK-Video Stabilization Taking all pixels into account took: '
       f'{end_time - start_time:.2f}[sec]')
 statistics["[TAU, TIME] naive LK implementation"] = end_time - start_time
-
-exit()
 
 # FASTER IMPLEMENTATION
 faster_output_video_name = f'{ID1}_{ID2}_faster_stabilized_video.avi'

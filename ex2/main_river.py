@@ -25,9 +25,9 @@ ID2 = '312497084'
 # best configuration: 
 # * -w 7 -i 8 : MSE ration 8.93
 
-WINDOW_SIZE_RIVER = args.window_size  # Add your value here!
-MAX_ITER_RIVER = args.max_iter # Add your value here!
-NUM_LEVELS_RIVER = args.pyramid_levels
+WINDOW_SIZE_RIVER = 7 # args.window_size  # Add your value here!
+MAX_ITER_RIVER = 8 # args.max_iter # Add your value here!
+NUM_LEVELS_RIVER = 5 # args.pyramid_levels
 
 # Output dir and statistics file preparations:
 RIVER_DIR = f'river_results'

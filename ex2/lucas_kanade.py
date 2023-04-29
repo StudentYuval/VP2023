@@ -4,7 +4,7 @@ from tqdm import tqdm
 from scipy import signal
 from scipy.interpolate import griddata
 import scipy.ndimage as ndimage
-
+import time
 
 # FILL IN YOUR ID
 ID1 = '206299463'
@@ -214,7 +214,7 @@ def warp_image(image: np.ndarray, u: np.ndarray, v: np.ndarray, mode: str = 'rem
         x, y = np.meshgrid(np.arange(w), np.arange(h))
         map_x = (x + u).astype(np.float32)
         map_y = (y + v).astype(np.float32)
-        image_warp = cv2.remap(image, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+        image_warp = cv2.remap(image, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=np.nan)
     elif mode == 'shift':
         ndimage.shift(image, (v, u), output=image_warp, order=3, mode='constant', cval=np.nan)
     else:
@@ -298,31 +298,32 @@ def lucas_kanade_optical_flow(I1: np.ndarray,
             v = factor_v*cv2.resize(v, pyramid_I2[i-1].shape[::-1])
     return u, v
 
-def resize_to_fit_decimation(shape: tuple, num_levels: int):
+def resize_to_fit_decimation(height: int, width: int, num_levels: int):
     ''' calculates new shape for an image that will be decimated num_levels times
         Note: the shape is in numpy format, exactly opposite of cv2 format
         I use cv2.resize(image, new_shape[::-1]) to resize the image to the new shape,
         as instructed in the recipe from the previous section
     '''
-    K = int(np.ceil(shape[0]/(2**(num_levels - 1 + 1))))
-    M = int(np.ceil(shape[1]/(2**(num_levels - 1 + 1))))
-    new_shape = (K*(2**(num_levels - 1 + 1)), M*(2**(num_levels - 1 + 1)))
-    return new_shape
+    K = int(np.ceil(height/(2**(num_levels - 1 + 1))))
+    M = int(np.ceil(width/(2**(num_levels - 1 + 1))))
+    return (K*(2**(num_levels - 1 + 1)), M*(2**(num_levels - 1 + 1)))
         
-def read_and_fit_next_frame_from_video(vc: cv2.VideoCapture, new_shape: tuple[int, int]) -> np.ndarray:
+def read_and_fit_next_frame_from_video(vc: cv2.VideoCapture, height: int, width: int) -> np.ndarray:
     ret, frame = vc.read()
     if not ret:
         None
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float64)
-    frame = cv2.resize(frame, new_shape[::-1])
+    frame = cv2.resize(frame, (width, height))
     return frame
 
-def write_frame_to_video(vw: cv2.VideoWriter, frame: np.ndarray, shape: tuple):
-    frame = cv2.resize(frame, shape[::-1])
+def write_frame_to_video(vw: cv2.VideoWriter, frame: np.ndarray, height: int, width: int):
+    frame = cv2.resize(frame, (width, height))
     vw.write(frame.astype(np.uint8))
 
 def save_frame_to_dir(frame: np.ndarray, frame_index: int):
-    cv2.imwrite(f'video_debug/frame_{frame_index}.png', frame.astype(np.uint8))
+    debug = False
+    if debug:
+        cv2.imwrite(f'video_debug/frame_{frame_index}.png', frame.astype(np.uint8))
 
 def plot_U(U: tuple[np.ndarray, np.ndarray]):
     import matplotlib.pyplot as plt
@@ -387,31 +388,36 @@ def lucas_kanade_video_stabilization(input_video_path: str,
        (7) Do not forget to gracefully close all VideoCapture and to destroy
        all windows.
     """
-    # initialize video capture, video writer
     vc = cv2.VideoCapture(input_video_path)
     params = get_video_parameters(vc)
+    orig_height = params['height']
+    orig_width = params['width']
+
     vw = cv2.VideoWriter(output_video_path, 
                                 fourcc=cv2.VideoWriter_fourcc(*'XVID'),
                                 fps=params['fps'],
-                                frameSize=(params['width'], params['height']),
+                                frameSize=(orig_width, orig_height),
                                 isColor=False
                             )
     
-    # read first frame, resize it, write it to video
-    orig_shape = (params['width'], params['height'])
-    new_shape = resize_to_fit_decimation(orig_shape, num_levels)
-
-    first_frame = read_and_fit_next_frame_from_video(vc, new_shape)
+    new_height, new_width = resize_to_fit_decimation(height=orig_height,
+                                         width=orig_width,
+                                         num_levels=num_levels)
+    
+    first_frame = read_and_fit_next_frame_from_video(vc, 
+                                                     height=new_height, 
+                                                     width=new_width)
+    
     if first_frame is None:
         raise ValueError('Could not read first frame from video, terminating.')
-    write_frame_to_video(vw, first_frame, orig_shape)
+    write_frame_to_video(vw, first_frame, height=orig_height, width=orig_width)
 
     # define region of interest
     start = window_size//2
     end = -1 * (start)
 
-    u = np.zeros(new_shape, dtype=np.float64)
-    v = np.zeros(new_shape, dtype=np.float64)
+    u = np.zeros((new_height, new_width), dtype=np.float64)
+    v = np.zeros((new_height, new_width), dtype=np.float64)
     prev_U = (u, v)
 
     save_frame_to_dir(first_frame, 0)
@@ -419,7 +425,7 @@ def lucas_kanade_video_stabilization(input_video_path: str,
     prev_frame = first_frame
     for i in tqdm(range(params['frame_count'] - 1)):
     #for i in tqdm(range(10)):
-        frame = read_and_fit_next_frame_from_video(vc, new_shape)
+        frame = read_and_fit_next_frame_from_video(vc, height=new_height, width=new_width)
         if frame is None:
             break # end of video arrived prematurely...
         
@@ -427,54 +433,85 @@ def lucas_kanade_video_stabilization(input_video_path: str,
         
         cur_U[0][start:end,start:end] = cur_U[0][start:end, start:end].mean()
         cur_U[1][start:end,start:end] = cur_U[1][start:end, start:end].mean()
-        prev_U[0][start:end,start:end] += cur_U[0][start:end, start:end]
-        prev_U[1][start:end,start:end] += cur_U[1][start:end, start:end]
+        prev_U[0][start:end,start:end] += cur_U[0][start:end,start:end]
+        prev_U[1][start:end,start:end] += cur_U[1][start:end,start:end]
 
-        #warped_frame = warp_image(frame, prev_U[0][start:end].mean(), prev_U[1][start:end].mean(), mode='shift')
         warped_frame = warp_image(frame, prev_U[0], prev_U[1])
 
         save_frame_to_dir(warped_frame, i + 1)
 
-        write_frame_to_video(vw, warped_frame, orig_shape)
+        write_frame_to_video(vw, warped_frame, height=orig_height, width=orig_width)
         prev_frame = frame # maybe prev_fame = warped_frame?
-
-    for i in range(21):
-        write_frame_to_video(vw, warped_frame, orig_shape)
 
     vw.release()
     vc.release()
     cv2.destroyAllWindows()
 
 
-
 def faster_lucas_kanade_step(I1: np.ndarray,
                              I2: np.ndarray,
                              window_size: int) -> tuple[np.ndarray, np.ndarray]:
-    """Faster implementation of a single Lucas-Kanade Step.
+    du = np.zeros(I1.shape, dtype=np.float64)
+    dv = np.zeros(I1.shape, dtype=np.float64)
+    
+    if I1.shape[0] * I1.shape[1] < 10000:
+        return lucas_kanade_step(I1, I2, window_size)
+    
+    
+    '''corners = cv2.cornerHarris(I2.astype(np.float32), 2, 3, 0.04)
+    corners = cv2.dilate(corners, None)
+    corners[corners < 0.01*corners.max()] = 0
+    corners[corners.nonzero()] = 1
+    corners = corners.astype(bool)
+    corner_coords = np.argwhere(corners)'''
 
-    (1) If the image is small enough (you need to design what is good
-    enough), simply return the result of the good old lucas_kanade_step
-    function.
-    (2) Otherwise, find corners in I2 and calculate u and v only for these
-    pixels.
-    (3) Return maps of u and v which are all zeros except for the corner
-    pixels you found in (2).
+    corner_coords = cv2.goodFeaturesToTrack(I2.astype(np.float32), maxCorners=500, qualityLevel=0.01, minDistance=10)
+    corner_coords = corner_coords.astype(np.int64).reshape((-1, 2))
+    # cv2 returns (col, row) and not (row, col)
+    corner_coords = corner_coords[:, ::-1]
+    corners = np.zeros_like(I2).astype(bool)
+    corners[corner_coords[:,0], corner_coords[:,1]] = True
 
-    Args:
-        I1: np.ndarray. Image at time t.
-        I2: np.ndarray. Image at time t+1.
-        window_size: int. The window is of shape window_size X window_size.
+    Ix = signal.convolve2d(I2, X_DERIVATIVE_FILTER, boundary='symm', mode='same')
+    Iy = signal.convolve2d(I2, Y_DERIVATIVE_FILTER, boundary='symm', mode='same')
+    It = I2 - I1
 
-    Returns:
-        (du, dv): tuple of np.ndarray-s. Each one of the shape of the
-        original image. dv encodes the shift in rows and du in columns.
-    """
+    for row, col in corner_coords:
+        # skip corners too close to edge
+        if row - window_size//2 < 0 or row + window_size//2 + 1 > I1.shape[0] or \
+           col - window_size//2 < 0 or col + window_size//2 + 1 > I1.shape[1]:
+            continue
 
-    du = np.zeros(I1.shape)
-    dv = np.zeros(I1.shape)
-    """INSERT YOUR CODE HERE.
-    Calculate du and dv correctly.
-    """
+        Ix_window = Ix[row-window_size//2:row+window_size//2+1, col-window_size//2:col+window_size//2+1]
+        Iy_window = Iy[row-window_size//2:row+window_size//2+1, col-window_size//2:col+window_size//2+1]
+        It_window = It[row-window_size//2:row+window_size//2+1, col-window_size//2:col+window_size//2+1]
+
+        A = np.vstack((Ix_window.flatten(), Iy_window.flatten())).T
+        b = -1 * It_window.flatten()
+        
+        try:
+            A_T_A = A.T @ A
+            A_T_b = A.T @ b
+          
+            tau = 1e8
+            cond_num = np.linalg.cond(A_T_A)
+            
+            if cond_num > tau:
+                u, v = (0, 0)
+            else:
+                A_T_A_inv = np.linalg.inv(A_T_A)
+                u, v = A_T_A_inv @ A_T_b
+            
+        except:
+            u, v = (0, 0)
+
+        du[row, col] = u
+        dv[row, col] = v
+
+    # set du, dv at valid pixels to mean of corners du, dv
+    du[window_size//2:-1*(window_size//2),window_size//2:-1*(window_size//2)] = du[corners].mean()
+    dv[window_size//2:-1*(window_size//2),window_size//2:-1*(window_size//2)] = dv[corners].mean()
+
     return du, dv
 
 
@@ -505,15 +542,24 @@ def faster_lucas_kanade_optical_flow(
     if I2.shape != IMAGE_SIZE:
         I2 = cv2.resize(I2, IMAGE_SIZE)
     pyramid_I1 = build_pyramid(I1, num_levels)  # create levels list for I1
-    pyarmid_I2 = build_pyramid(I2, num_levels)  # create levels list for I1
-    u = np.zeros(pyarmid_I2[-1].shape)  # create u in the size of smallest image
-    v = np.zeros(pyarmid_I2[-1].shape)  # create v in the size of smallest image
-    """INSERT YOUR CODE HERE.
-    Replace u and v with their true value."""
-    u = np.zeros(I1.shape)
-    v = np.zeros(I1.shape)
-    return u, v
+    pyramid_I2 = build_pyramid(I2, num_levels)  # create levels list for I1
+    u = np.zeros(pyramid_I2[-1].shape)  # create u in the size of smallest image
+    v = np.zeros(pyramid_I2[-1].shape)  # create v in the size of smallest image
 
+    for i in range(num_levels, -1, -1):
+        warped_i2 = warp_image(pyramid_I2[i], u, v)
+        for _ in range(max_iter):
+            du, dv = faster_lucas_kanade_step(pyramid_I1[i], warped_i2, window_size)
+            u += du
+            v += dv
+            warped_i2 = warp_image(pyramid_I2[i], u, v)
+        if i != 0:
+            h, w = pyramid_I2[i-1].shape
+            factor_u = w / u.shape[1]
+            factor_v = h / v.shape[0]
+            u = factor_u*cv2.resize(u, pyramid_I2[i-1].shape[::-1], )
+            v = factor_v*cv2.resize(v, pyramid_I2[i-1].shape[::-1])
+    return u, v
 
 def lucas_kanade_faster_video_stabilization(
         input_video_path: str, output_video_path: str, window_size: int,
@@ -530,8 +576,65 @@ def lucas_kanade_faster_video_stabilization(
     Returns:
         None.
     """
-    """INSERT YOUR CODE HERE."""
-    pass
+
+    vc = cv2.VideoCapture(input_video_path)
+    params = get_video_parameters(vc)
+    orig_height = params['height']
+    orig_width = params['width']
+
+    vw = cv2.VideoWriter(output_video_path, 
+                                fourcc=cv2.VideoWriter_fourcc(*'XVID'),
+                                fps=params['fps'],
+                                frameSize=(orig_width, orig_height),
+                                isColor=False
+                            )
+    
+    new_height, new_width = resize_to_fit_decimation(height=orig_height,
+                                         width=orig_width,
+                                         num_levels=num_levels)
+    
+    first_frame = read_and_fit_next_frame_from_video(vc, 
+                                                     height=new_height, 
+                                                     width=new_width)
+    
+    if first_frame is None:
+        raise ValueError('Could not read first frame from video, terminating.')
+    write_frame_to_video(vw, first_frame, height=orig_height, width=orig_width)
+
+    # define region of interest
+    start = window_size//2
+    end = -1 * (start)
+
+    u = np.zeros((new_height, new_width), dtype=np.float64)
+    v = np.zeros((new_height, new_width), dtype=np.float64)
+    prev_U = (u, v)
+
+    save_frame_to_dir(first_frame, 0)
+
+    prev_frame = first_frame
+    for i in tqdm(range(params['frame_count'] - 1)):
+    #for i in tqdm(range(10)):
+        frame = read_and_fit_next_frame_from_video(vc, height=new_height, width=new_width)
+        if frame is None:
+            break # end of video arrived prematurely...
+        cur_U = faster_lucas_kanade_optical_flow(prev_frame, frame, window_size, max_iter, num_levels)
+        
+        cur_U[0][start:end,start:end] = cur_U[0][start:end, start:end].mean()
+        cur_U[1][start:end,start:end] = cur_U[1][start:end, start:end].mean()
+        prev_U[0][start:end,start:end] += cur_U[0][start:end,start:end]
+        prev_U[1][start:end,start:end] += cur_U[1][start:end,start:end]
+
+        warped_frame = warp_image(frame, prev_U[0], prev_U[1])
+
+        save_frame_to_dir(warped_frame, i + 1)
+
+        write_frame_to_video(vw, warped_frame, height=orig_height, width=orig_width)
+        prev_frame = frame # maybe prev_fame = warped_frame?
+
+    vw.release()
+    vc.release()
+    cv2.destroyAllWindows()
+        
 
 
 def lucas_kanade_faster_video_stabilization_fix_effects(
@@ -554,7 +657,67 @@ def lucas_kanade_faster_video_stabilization_fix_effects(
     Returns:
         None.
     """
-    """INSERT YOUR CODE HERE."""
-    pass
+
+    vc = cv2.VideoCapture(input_video_path)
+    params = get_video_parameters(vc)
+    orig_height = params['height']
+    orig_width = params['width']
+
+    vw = cv2.VideoWriter(output_video_path, 
+                                fourcc=cv2.VideoWriter_fourcc(*'XVID'),
+                                fps=params['fps'],
+                                frameSize=(orig_width, orig_height),
+                                isColor=False
+                            )
+    
+    new_height, new_width = resize_to_fit_decimation(height=orig_height,
+                                         width=orig_width,
+                                         num_levels=num_levels)
+    
+    first_frame = read_and_fit_next_frame_from_video(vc, 
+                                                     height=new_height, 
+                                                     width=new_width)
+    
+    if first_frame is None:
+        raise ValueError('Could not read first frame from video, terminating.')
+    write_frame_to_video(vw, first_frame, height=orig_height, width=orig_width)
+
+    # define region of interest
+    start = window_size//2
+    end = -1 * (start)
+
+    u = np.zeros((new_height, new_width), dtype=np.float64)
+    v = np.zeros((new_height, new_width), dtype=np.float64)
+    prev_U = (u, v)
+
+    save_frame_to_dir(first_frame, 0)
+
+    prev_frame = first_frame
+    for i in tqdm(range(params['frame_count'] - 1)):
+    #for i in tqdm(range(10)):
+        frame = read_and_fit_next_frame_from_video(vc, height=new_height, width=new_width)
+        if frame is None:
+            break # end of video arrived prematurely...
+        
+        cur_U = faster_lucas_kanade_optical_flow(prev_frame, frame, window_size, max_iter, num_levels)
+        
+        cur_U[0][start:end,start:end] = cur_U[0][start:end, start:end].mean()
+        cur_U[1][start:end,start:end] = cur_U[1][start:end, start:end].mean()
+        prev_U[0][start:end,start:end] += cur_U[0][start:end,start:end]
+        prev_U[1][start:end,start:end] += cur_U[1][start:end,start:end]
+
+        warped_frame = warp_image(frame, prev_U[0], prev_U[1])
+
+        warped_frame = cv2.resize(warped_frame, (orig_width, orig_height), interpolation=cv2.INTER_CUBIC)
+        warped_frame = warped_frame[start_cols:-end_cols, start_rows:-end_rows]
+        warped_frame = cv2.resize(warped_frame, (orig_width, orig_height), interpolation=cv2.INTER_CUBIC)
+
+        write_frame_to_video(vw, warped_frame, height=orig_height, width=orig_width)
+        prev_frame = frame
+
+    vw.release()
+    vc.release()
+    cv2.destroyAllWindows()
+    
 
 

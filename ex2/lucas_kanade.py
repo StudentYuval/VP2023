@@ -320,11 +320,6 @@ def write_frame_to_video(vw: cv2.VideoWriter, frame: np.ndarray, height: int, wi
     frame = cv2.resize(frame, (width, height))
     vw.write(frame.astype(np.uint8))
 
-def save_frame_to_dir(frame: np.ndarray, frame_index: int):
-    debug = False
-    if debug:
-        cv2.imwrite(f'video_debug/frame_{frame_index}.png', frame.astype(np.uint8))
-
 def plot_U(U: tuple[np.ndarray, np.ndarray]):
     import matplotlib.pyplot as plt
     fig, axs = plt.subplots(1, 2, figsize=(10, 5))
@@ -420,8 +415,6 @@ def lucas_kanade_video_stabilization(input_video_path: str,
     v = np.zeros((new_height, new_width), dtype=np.float64)
     prev_U = (u, v)
 
-    save_frame_to_dir(first_frame, 0)
-
     prev_frame = first_frame
     for i in tqdm(range(params['frame_count'] - 1)):
     #for i in tqdm(range(10)):
@@ -437,8 +430,6 @@ def lucas_kanade_video_stabilization(input_video_path: str,
         prev_U[1][start:end,start:end] += cur_U[1][start:end,start:end]
 
         warped_frame = warp_image(frame, prev_U[0], prev_U[1])
-
-        save_frame_to_dir(warped_frame, i + 1)
 
         write_frame_to_video(vw, warped_frame, height=orig_height, width=orig_width)
         prev_frame = frame # maybe prev_fame = warped_frame?
@@ -465,9 +456,11 @@ def faster_lucas_kanade_step(I1: np.ndarray,
     corners = corners.astype(bool)
     corner_coords = np.argwhere(corners)'''
 
+    # use of this function instead of cv2.cornerHarris yidls way better results, and is ~3x faster!
     corner_coords = cv2.goodFeaturesToTrack(I2.astype(np.float32), maxCorners=500, qualityLevel=0.01, minDistance=10)
     corner_coords = corner_coords.astype(np.int64).reshape((-1, 2))
-    # cv2 returns (col, row) and not (row, col)
+    
+    # I keep forgetting that cv2 returns (col, row) and not (row, col)
     corner_coords = corner_coords[:, ::-1]
     corners = np.zeros_like(I2).astype(bool)
     corners[corner_coords[:,0], corner_coords[:,1]] = True
@@ -508,7 +501,7 @@ def faster_lucas_kanade_step(I1: np.ndarray,
         du[row, col] = u
         dv[row, col] = v
 
-    # set du, dv at valid pixels to mean of corners du, dv
+    # set du, dv at valid pixels to mean of du, dv at corners
     du[window_size//2:-1*(window_size//2),window_size//2:-1*(window_size//2)] = du[corners].mean()
     dv[window_size//2:-1*(window_size//2),window_size//2:-1*(window_size//2)] = dv[corners].mean()
 
@@ -609,8 +602,6 @@ def lucas_kanade_faster_video_stabilization(
     v = np.zeros((new_height, new_width), dtype=np.float64)
     prev_U = (u, v)
 
-    save_frame_to_dir(first_frame, 0)
-
     prev_frame = first_frame
     for i in tqdm(range(params['frame_count'] - 1)):
     #for i in tqdm(range(10)):
@@ -626,10 +617,8 @@ def lucas_kanade_faster_video_stabilization(
 
         warped_frame = warp_image(frame, prev_U[0], prev_U[1])
 
-        save_frame_to_dir(warped_frame, i + 1)
-
         write_frame_to_video(vw, warped_frame, height=orig_height, width=orig_width)
-        prev_frame = frame # maybe prev_fame = warped_frame?
+        prev_frame = frame
 
     vw.release()
     vc.release()
@@ -689,8 +678,6 @@ def lucas_kanade_faster_video_stabilization_fix_effects(
     u = np.zeros((new_height, new_width), dtype=np.float64)
     v = np.zeros((new_height, new_width), dtype=np.float64)
     prev_U = (u, v)
-
-    save_frame_to_dir(first_frame, 0)
 
     prev_frame = first_frame
     for i in tqdm(range(params['frame_count'] - 1)):

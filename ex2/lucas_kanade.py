@@ -706,5 +706,3 @@ def lucas_kanade_faster_video_stabilization_fix_effects(
     vc.release()
     cv2.destroyAllWindows()
     
-
-

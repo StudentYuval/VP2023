@@ -1,6 +1,7 @@
 import cv2
 import time
 import json
+import numpy as np
 from collections import OrderedDict
 from lucas_kanade import lucas_kanade_video_stabilization, \
     lucas_kanade_faster_video_stabilization, \
@@ -12,12 +13,13 @@ ID1 = '206299463'
 ID2 = '312497084'
 
 # Choose parameters
-WINDOW_SIZE_TAU = 5  # Add your value here!
-MAX_ITER_TAU = 5  # Add your value here!
-NUM_LEVELS_TAU = 5  # Add your value here!
+WINDOW_SIZE_TAU = 5
+MAX_ITER_TAU = 8
+NUM_LEVELS_TAU = 5
 
 
 # Output dir and statistics file preparations:
+TAU_DIR = f'tau_results'
 STATISTICS_PATH = f'TAU_VIDEO_{ID1}_{ID2}_mse_and_time_stats.json'
 statistics = OrderedDict()
 
@@ -40,21 +42,22 @@ def calc_mean_mse_video(path: str) -> float:
     # extract first frame
     prev_frame = input_cap.retrieve()[1]
     # convert to greyscale
-    prev_frame = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+    prev_frame = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY).astype(np.float64)
     mse = 0.0
     for i in range(1, frame_amount):
         input_cap.grab()
         frame = input_cap.retrieve()[1]  # grab next frame
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float64)
         mse += ((frame - prev_frame) ** 2).mean()
         prev_frame = frame
     mean_mse = mse / (frame_amount - 1)
-    return mean_mse
-
+    input_cap.release()
+    return float(mean_mse)
 
 # Load video file
 input_video_name = 'input.avi'
 
+# NAIVE IMPLEMENTATION
 output_video_name = f'{ID1}_{ID2}_stabilized_video.avi'
 start_time = time.time()
 lucas_kanade_video_stabilization(input_video_name,
@@ -67,6 +70,7 @@ print(f'LK-Video Stabilization Taking all pixels into account took: '
       f'{end_time - start_time:.2f}[sec]')
 statistics["[TAU, TIME] naive LK implementation"] = end_time - start_time
 
+# FASTER IMPLEMENTATION
 faster_output_video_name = f'{ID1}_{ID2}_faster_stabilized_video.avi'
 start_time = time.time()
 lucas_kanade_faster_video_stabilization(input_video_name,
@@ -92,7 +96,7 @@ statistics["[TAU, TIME] FASTER, WITHOUT BORDERS LK implementation "] = \
     end_time - start_time
 
 
-
+# MSE calculations
 print("The Following MSE values should make sense to you:")
 original_mse = calc_mean_mse_video(input_video_name)
 print(f"Mean MSE between frames for original video: {original_mse:.2f}")

@@ -6,21 +6,31 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 from PIL import Image
+import argparse
 from lucas_kanade import lucas_kanade_optical_flow, warp_image, \
     lucas_kanade_step
 
+parser = argparse.ArgumentParser()
+parser.add_argument("-id", "--run-id", type=int, default=0, dest="run_id")
+parser.add_argument("-n", "--pyramid-levels", type=int, default=5, dest='pyramid_levels')
+parser.add_argument("-w", "--window-size", type=int, default=7, dest='window_size')
+parser.add_argument("-i", "--max-iter", type=int, default=8, dest='max_iter')
+args = parser.parse_args()
 
 # FILL IN YOUR ID
 ID1 = '206299463'
 ID2 = '312497084'
 
 # Choose parameters
-WINDOW_SIZE_RIVER = 5  # Add your value here!
-MAX_ITER_RIVER = 10  # Add your value here!
-NUM_LEVELS_RIVER = 5
+# best configuration: 
+# * -w 7 -i 8 : MSE ration 8.93
+
+WINDOW_SIZE_RIVER = 7 # args.window_size  # Add your value here!
+MAX_ITER_RIVER = 8 # args.max_iter # Add your value here!
+NUM_LEVELS_RIVER = 5 # args.pyramid_levels
 
 # Output dir and statistics file preparations:
-RIVER_DIR = 'river_results'
+RIVER_DIR = f'river_results'
 os.makedirs(RIVER_DIR, exist_ok=True)
 STATISTICS_PATH = f'RIVER_{ID1}_{ID2}_mse_and_time_stats.json'
 
@@ -46,14 +56,14 @@ def calc_mse_at_interest_region(
     """
     first_image_interesting_part = first_image[
                                    interest_size:-interest_size,
-                                   interest_size:-interest_size]
+                                   interest_size:-interest_size].astype(np.float32)
     second_image_interesting_part = second_image[
                                    interest_size:-interest_size,
-                                   interest_size:-interest_size]
+                                   interest_size:-interest_size].astype(np.float32)
     squared_difference = (first_image_interesting_part -
                           second_image_interesting_part)**2
     mse = squared_difference.mean()
-    return mse
+    return float(mse)
 
 
 # Load images I1,I2
@@ -62,7 +72,7 @@ I2 = cv2.cvtColor(cv2.imread('river2.png'), cv2.COLOR_RGB2GRAY)
 
 # Compute optical flow using LK algorithm
 start_time = time.time()
-(du, dv) = lucas_kanade_step(I1, I2, WINDOW_SIZE_RIVER)
+(du, dv) = lucas_kanade_step(I1.astype(np.float64), I2.astype(np.float64), WINDOW_SIZE_RIVER)
 end_time = time.time()
 statistics['[RIVER, TIME] One Step LK'] = end_time - start_time
 
@@ -79,8 +89,8 @@ print(f'MSE of original frames: {original_mse}')
 print(f'MSE after one LK step: {after_one_lk_step_mse}')
 print(f'MSE ratio one step LK: {original_mse / after_one_lk_step_mse}')
 print(f'One LK-step took: {end_time - start_time:.2f}[sec]')
-statistics['[RIVER, MSE] Original video'] = original_mse
-statistics['[RIVER, MSE] One Step LK'] = after_one_lk_step_mse
+statistics['[RIVER, MSE] Original video'] = float(original_mse)
+statistics['[RIVER, MSE] One Step LK'] = float(after_one_lk_step_mse)
 
 
 one_step_warped_image = warp_image(I2, du, dv)
@@ -95,7 +105,8 @@ plt.title('I1')
 plt.imshow(I1, cmap='gray')
 plt.subplot(2, 3, 5)
 plt.title('I2 warped to I1')
-plt.imshow(one_step_warped_image, cmap='gray')
+#plt.imshow(one_step_warped_image, cmap='gray')
+plt.imshow(I2_one_lk_step, cmap='gray')
 plt.subplot(2, 3, 6)
 plt.title('I2')
 plt.imshow(I2, cmap='gray')
@@ -108,7 +119,7 @@ plt.savefig(os.path.join(RIVER_DIR, '0_river_one_LK_step_result.png'))
 cv2.imwrite(os.path.join(RIVER_DIR, 'river1.png'), I1.astype(np.uint8))
 cv2.imwrite(os.path.join(RIVER_DIR, 'river2.png'), I2.astype(np.uint8))
 cv2.imwrite(os.path.join(RIVER_DIR, 'river2_warped.png'),
-            one_step_warped_image.astype(np.uint8))
+            I2_one_lk_step.astype(np.uint8))
 image_paths = [os.path.join(RIVER_DIR, x)
                for x in ['river1.png', 'river2.png']]
 images = (Image.open(f) for f in image_paths)
@@ -142,15 +153,17 @@ print(f'MSE of original frames: {original_mse}')
 print(f'MSE after full LK: {after_full_lk_mse}')
 print(f'MSE ratio full LK: {original_mse / after_full_lk_mse}')
 print(f'Full LK-step took: {end_time - start_time:.2f}[sec]')
-statistics['[RIVER, MSE] Full LK'] = after_full_lk_mse
 
+statistics['[RIVER, MSE] Full LK'] = float(after_full_lk_mse)
+statistics['[RIVER, MSE] Full to Original Ratio'] = \
+    float(original_mse / after_full_lk_mse)
 
 plt.subplot(2, 2, 1)
 plt.title('du')
-plt.imshow(du, cmap='gray')
+plt.imshow(u, cmap='gray')
 plt.subplot(2, 2, 2)
 plt.title('dv')
-plt.imshow(dv, cmap='gray')
+plt.imshow(v, cmap='gray')
 plt.subplot(2, 3, 4)
 plt.title('I1')
 plt.imshow(I1, cmap='gray')
@@ -172,7 +185,7 @@ image_paths = [os.path.join(RIVER_DIR, x)
           for x in ['river1.png', 'river2_warped_full_lk.png']]
 images = (Image.open(f) for f in image_paths)
 img = next(images)
-img.save(fp=os.path.join('river_results', '3_after_full_lk.gif'),
+img.save(fp=os.path.join(RIVER_DIR, '3_after_full_lk.gif'),
          format='GIF', append_images=images, save_all=True, duration=200,
          loop=0)
 

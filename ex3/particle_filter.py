@@ -5,11 +5,13 @@ import numpy as np
 import numpy.matlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from numpy.random import choice
+from scipy.stats import norm
 
 
 # change IDs to your IDs.
-ID1 = "123456789"
-ID2 = "987654321"
+ID1 = '206299463'
+ID2 = '312497084'
 
 ID = "HW3_{0}_{1}".format(ID1, ID2)
 RESULTS = 'results'
@@ -39,12 +41,25 @@ def predict_particles(s_prior: np.ndarray) -> np.ndarray:
     Return:
         state_drifted: np.ndarray. The prior state after drift (applying the motion model) and adding the noise.
     """
+    # Progress the state with time
     s_prior = s_prior.astype(float)
-    state_drifted = s_prior
-    """ DELETE THE LINE ABOVE AND:
-    INSERT YOUR CODE HERE."""
-    state_drifted = state_drifted.astype(int)
-    return state_drifted
+    state_drifted = np.copy(s_prior)
+    
+    drift_factor = 1.2  # Adjust the drift factor as needed
+    
+    # Estimate velocity from previous and current positions
+    prev_positions = s_prior[:2] - s_prior[4:]
+    curr_positions = s_prior[:2]
+    velocity = curr_positions - prev_positions
+    
+    state_drifted[:2] += drift_factor * velocity
+
+    # Add noise with different variances for X and Y axes
+    noise_x = np.random.normal(0, 0.2, size=s_prior[0].shape)  # Larger variance for X
+    noise_y = np.random.normal(0, 0.05, size=s_prior[1].shape)  # Smaller variance for Y
+    state_drifted[0] += noise_x
+    state_drifted[1] += noise_y
+    return state_drifted.astype(int)
 
 
 def compute_normalized_histogram(image: np.ndarray, state: np.ndarray) -> np.ndarray:
@@ -57,17 +72,15 @@ def compute_normalized_histogram(image: np.ndarray, state: np.ndarray) -> np.nda
     Return:
         hist: np.ndarray. histogram of quantized colors.
     """
-    state = np.floor(state)
-    state = state.astype(int)
-    hist = np.zeros(1, 16 * 16 * 16)
-    """ DELETE THE LINE ABOVE AND:
-        INSERT YOUR CODE HERE."""
-    hist = np.reshape(hist, 16 * 16 * 16)
+    x, y, w, h, _, _ = state.astype(int)
+    # Crop the image
+    cropped_image = image[y-h:y+h, x-w:x+w]
+    # Compute histogram
+    hist = cv2.calcHist([cropped_image], [0, 1, 2], None, [16, 16, 16], [0, 256, 0, 256, 0, 256])
+    # Normalize
+    hist = hist / hist.sum()
+    return hist.flatten()
 
-    # normalize
-    hist = hist/sum(hist)
-
-    return hist
 
 
 def sample_particles(previous_state: np.ndarray, cdf: np.ndarray) -> np.ndarray:
@@ -82,10 +95,22 @@ def sample_particles(previous_state: np.ndarray, cdf: np.ndarray) -> np.ndarray:
     Return:
         s_next: np.ndarray. Sampled particles. shape: (6, N)
     """
-    S_next = np.zeros(previous_state.shape)
-    """ DELETE THE LINE ABOVE AND:
-        INSERT YOUR CODE HERE."""
-    return S_next
+    normalized_cdf = cdf / np.sum(cdf)  # Normalize the probabilities
+    indices = np.arange(previous_state.shape[1])
+    new_indices = choice(indices, size=len(indices), p=normalized_cdf)
+    
+    # Perform adaptive resampling
+    effective_particle_count = 1. / np.sum(np.square(cdf))
+    resampling_threshold = N / 2  # Adjust the resampling threshold as needed
+    
+    if effective_particle_count < resampling_threshold:
+        # Perform resampling
+        s_next = previous_state[:, new_indices]
+    else:
+        # No resampling required, use the original particles
+        s_next = previous_state
+    
+    return s_next
 
 
 def bhattacharyya_distance(p: np.ndarray, q: np.ndarray) -> float:
@@ -98,10 +123,8 @@ def bhattacharyya_distance(p: np.ndarray, q: np.ndarray) -> float:
     Return:
         distance: float. The Bhattacharyya Distance.
     """
-    distance = 0
-    """ DELETE THE LINE ABOVE AND:
-        INSERT YOUR CODE HERE."""
-    return distance
+    return -np.log(np.sum(np.sqrt(p * q)))
+
 
 
 def show_particles(image: np.ndarray, state: np.ndarray, W: np.ndarray, frame_index: int, ID: str,
@@ -110,23 +133,18 @@ def show_particles(image: np.ndarray, state: np.ndarray, W: np.ndarray, frame_in
     fig, ax = plt.subplots(1)
     image = image[:,:,::-1]
     plt.imshow(image)
-    plt.title(ID + " - Frame mumber = " + str(frame_index))
+    plt.title(ID + " - Frame number = " + str(frame_index))
 
     # Avg particle box
-    (x_avg, y_avg, w_avg, h_avg) = (0, 0, 0, 0)
-    """ DELETE THE LINE ABOVE AND:
-        INSERT YOUR CODE HERE."""
-
-
-    rect = patches.Rectangle((x_avg, y_avg), w_avg, h_avg, linewidth=1, edgecolor='g', facecolor='none')
+    avg_state = np.average(state, axis=1, weights=W)
+    (x_avg, y_avg, w_avg, h_avg, _, _) = avg_state
+    rect = patches.Rectangle((x_avg-w_avg, y_avg-h_avg), 2*w_avg, 2*h_avg, linewidth=1, edgecolor='g', facecolor='none')
     ax.add_patch(rect)
 
     # calculate Max particle box
-    (x_max, y_max, w_max, h_max) = (0, 0, 0, 0)
-    """ DELETE THE LINE ABOVE AND:
-        INSERT YOUR CODE HERE."""
-
-    rect = patches.Rectangle((x_max, y_max), w_max, h_max, linewidth=1, edgecolor='r', facecolor='none')
+    max_state = state[:, np.argmax(W)]
+    (x_max, y_max, w_max, h_max, _, _) = max_state
+    rect = patches.Rectangle((x_max-w_max, y_max-h_max), 2*w_max, 2*h_max, linewidth=1, edgecolor='r', facecolor='none')
     ax.add_patch(rect)
     plt.show(block=False)
 
@@ -144,11 +162,21 @@ def main():
     image = cv2.imread(os.path.join(IMAGE_DIR_PATH, "001.png"))
 
     # COMPUTE NORMALIZED HISTOGRAM
-    q = compute_normalized_histogram(image, s_initial)
-
+    q = compute_normalized_histogram(image, np.array(s_initial))
+    
     # COMPUTE NORMALIZED WEIGHTS (W) AND PREDICTOR CDFS (C)
-    # YOU NEED TO FILL THIS PART WITH CODE:
-    """INSERT YOUR CODE HERE."""
+    weights = np.array([bhattacharyya_distance(compute_normalized_histogram(image, s), q) for s in S.T])
+    weights = np.exp(-weights)
+    weights /= weights.sum()
+    
+    # Initialize the variable W with the computed weights
+    W = weights
+
+    # COMPUTE CDF
+    cdf = np.cumsum(weights)
+
+    # sample particles
+    S = sample_particles(S, cdf)
 
     images_processed = 1
 
@@ -166,7 +194,7 @@ def main():
         current_image = cv2.imread(image_path)
 
         # SAMPLE THE CURRENT PARTICLE FILTERS
-        S_next_tag = sample_particles(S_prev, C)
+        S_next_tag = sample_particles(S_prev, cdf)
 
         # PREDICT THE NEXT PARTICLE FILTERS (YOU MAY ADD NOISE
         S = predict_particles(S_next_tag)

@@ -57,8 +57,7 @@ def enhance_edges(frame: np.ndarray):
     #blurred = frame.copy()
     dx = cv2.Sobel(blurred, -1, 1, 0, ksize=5)
     dy = cv2.Sobel(blurred, -1, 0, 1, ksize=5)
-    #return np.abs(dx) + np.abs(dy)
-    return cv2.addWeighted(dx, 0.5, dy, 0.5, 0)
+    return cv2.addWeighted(np.abs(dx), 0.5, np.abs(dy), 0.5, 0)
 
 def find_points_to_track(frame: np.ndarray, frame_height: int = 1080, frame_width: int = 1920,
                          mask:np.ndarray = None, max_num_points: int = 0) -> np.ndarray:

@@ -3,6 +3,7 @@ import time
 import numpy as np
 from tqdm import tqdm
 from funcs_and_structs import *
+import matplotlib.pyplot as plt
 
 def stabilization_block(input_path: str, output_path: str, show_work: bool = False) -> float:
     print("Stabilizing video...")
@@ -10,6 +11,7 @@ def stabilization_block(input_path: str, output_path: str, show_work: bool = Fal
     start_time = time.time()
     vc = cv2.VideoCapture(input_path)
     ret, prev_frame = vc.read()
+    first_frame = prev_frame.copy()
 
     if not ret:
         print('failed to read first frame')
@@ -19,11 +21,11 @@ def stabilization_block(input_path: str, output_path: str, show_work: bool = Fal
     vw = open_writer(output_path, params)
     vw.write(prev_frame)
 
-    lk_params = {
+    optical_flow_params = {
                     "winSize":(7,7),
                     "maxLevel":5,
                     "criteria":(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_MAX_ITER, 5, 0.0001)
-    }
+            }
 
     y_offset_start = round(params.Height*0.03)
     y_offset_end = round(params.Height*0.99)
@@ -31,16 +33,15 @@ def stabilization_block(input_path: str, output_path: str, show_work: bool = Fal
     x_offset_end = round(params.Width*0.99)
     warped_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
     warped = prev_frame.copy()
-    prev_orig_frame = prev_frame.copy()
+    borders_estimator = np.zeros_like(warped, dtype=np.uint8)
     disp_features = None
 
     if show_work:
+        prev_orig_frame = prev_frame.copy()
+
         cv2.namedWindow('showing_work', cv2.WINDOW_GUI_NORMAL)
         cv2.resizeWindow('showing_work', width=1000, height=300)
 
-        cv2.namedWindow('sobel_work', cv2.WINDOW_GUI_NORMAL)
-        cv2.resizeWindow('sobel_work', width=500, height=300)
-    
         avg_stab_mse = 0
         avg_orig_mse = 0
 
@@ -50,12 +51,10 @@ def stabilization_block(input_path: str, output_path: str, show_work: bool = Fal
             print('failed to read next frame')
             break
         
-        edges = enhance_edges(warped_gray)
-        
         cur_gray = cv2.cvtColor(cur_frame, cv2.COLOR_BGR2GRAY)
         orig_features = find_points_to_track(warped_gray)
-        disp_features, st, err = cv2.calcOpticalFlowPyrLK(warped_gray, cur_gray, orig_features, disp_features, **lk_params)
-        
+        disp_features, st, err = cv2.calcOpticalFlowPyrLK(warped_gray, cur_gray, orig_features, disp_features, **optical_flow_params)
+
         distances = np.sqrt(np.power(orig_features - disp_features,2).sum(axis=2))
         mean_distance = distances[st == 1].mean()
         threshold = 1.5*mean_distance # best is 1.5 the average distance between points!
@@ -63,10 +62,10 @@ def stabilization_block(input_path: str, output_path: str, show_work: bool = Fal
         orig_points = orig_features[(st == 1) & (distances <= threshold)]
         
         M, used_points = cv2.findHomography(disp_points, orig_points, method=cv2.RANSAC, ransacReprojThreshold=1.0)
-        warped = cv2.warpPerspective(cur_frame, M, (params.Width, params.Height), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT)
+        warped = cv2.warpPerspective(cur_frame, M, (params.Width, params.Height), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
 
         warped_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-        
+
         warped = warped[y_offset_start:y_offset_end, x_offset_start:x_offset_end]
         warped = cv2.resize(warped, dsize=(params.Width, params.Height))
         
@@ -77,9 +76,10 @@ def stabilization_block(input_path: str, output_path: str, show_work: bool = Fal
             orig_mse = calc_mse_between_frames(prev_orig_frame, cur_frame)
             avg_orig_mse = (avg_orig_mse*i + orig_mse)/(i+1)
 
+            prev_orig_frame = cur_frame.copy()
+
         vw.write(warped)
         prev_frame = warped.copy()
-        prev_orig_frame = cur_frame.copy()
         
         # for debugging, might use it for the report
         if show_work:
@@ -100,19 +100,14 @@ def stabilization_block(input_path: str, output_path: str, show_work: bool = Fal
             cv2.imshow('showing_work', to_show)
             cv2.moveWindow('showing_work', 0, 0)
 
-            cv2.imshow('sobel_work', edges)
-            cv2.moveWindow('sobel_work', 0, 350)
-
             key_input = cv2.waitKey(1) & 0xFF
             if key_input == ord('q'):
                 print("window closed by user")
-                cv2.destroyWindow('sobel_work')
                 cv2.destroyWindow('showing_work')
                 show_work = False
                 break
             elif key_input == ord('c'):
                 print("Terminated by user")
-                cv2.destroyWindow('sobel_work')
                 cv2.destroyWindow('showing_work')
                 show_work = False
                 
@@ -139,3 +134,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     stabilization_block(args.input_path, args.output_path, args.show_work)
+    

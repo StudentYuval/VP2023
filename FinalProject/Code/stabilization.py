@@ -6,7 +6,7 @@ from funcs_and_structs import *
 import matplotlib.pyplot as plt
 
 def stabilization_block(input_path: str, output_path: str, show_work: bool = False) -> float:
-    print("Stabilizing video...")
+    print("Stabilizing...")
     
     start_time = time.time()
     vc = cv2.VideoCapture(input_path)
@@ -115,8 +115,6 @@ def stabilization_block(input_path: str, output_path: str, show_work: bool = Fal
     vc.release()
     vw.release()
     cv2.destroyAllWindows()
-    
-    print(f"Finished stabilizing video")
     
     if show_work:
         print(f"Average MSE of original video: {avg_orig_mse:.2f}")

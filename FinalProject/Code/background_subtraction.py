@@ -29,7 +29,6 @@ def train_bg_subtractor(vc: cv2.VideoCapture,
                              varThreshold: int=50, 
                              detectShadows: bool=False) -> tuple[cv2.BackgroundSubtractorMOG2, np.ndarray]:
     bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=history, varThreshold=varThreshold, detectShadows=detectShadows)
-    #bg_subtractor = cv2.createBackgroundSubtractorKNN(history=history, dist2Threshold=varThreshold, detectShadows=detectShadows)
     num_frames = int(vc.get(cv2.CAP_PROP_FRAME_COUNT))
 
     vc.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -188,12 +187,12 @@ def bg_subtraction_block(stabilized_path: str,
     offset_x = round(0.052*params.Width)
 
     history_length = params.NumFrames//3
-
-    rev_bg_subtractor, _ = train_bg_subtractor(vc, offset_y=30, offset_x=100,
-                                                history=history_length, varThreshold=40, 
+    thresh = 25 # 40
+    rev_bg_subtractor, _ = train_bg_subtractor(vc, offset_y=offset_y, offset_x=offset_x,
+                                                history=history_length, varThreshold=thresh,
                                                 detectShadows=True, learningRate=-1, reverse=True)
-    fwd_bg_subtractor, _ = train_bg_subtractor(vc, offset_y=30, offset_x=100,
-                                                history=history_length, varThreshold=40,
+    fwd_bg_subtractor, _ = train_bg_subtractor(vc, offset_y=offset_y, offset_x=offset_x,
+                                                history=history_length, varThreshold=thresh,
                                                 detectShadows=True, learningRate=-1, reverse=False)
 
     apply_subtractor_to_video(vc ,rev_bg_subtractor, fwd_bg_subtractor, 

@@ -22,7 +22,7 @@ timing_json = OrderedDict()
 tracking_json = OrderedDict()
 timing_json["time_to_stabilize"] = stabilization_block(paths.Input, paths.Stabilized, show_work=args.show_work)
 timing_json["time_to_binary"] = bg_subtraction_block(paths.Stabilized, paths.Extracted, paths.Binary, show_work=args.show_work)
-timing_json["time_to_alpha"], timing_json["time_to_matted"] = matting_block(paths.Extracted, paths.Binary, paths.Background, paths.Matted, paths.Alpha)
+timing_json["time_to_matted"], timing_json["time_to_alpha"] = matting_block(paths.Extracted, paths.Binary, paths.Background, paths.Matted, paths.Alpha, show_work=args.show_work)
 timing_json["time_to_output"] = tracking_block(paths.Matted, paths.Output, tracking_json)
 
 with open(paths.Timing, 'w') as f:
